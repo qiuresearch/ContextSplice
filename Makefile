@@ -9,7 +9,7 @@ MAKEFLAGS += --always-make
 # Use ENV_VAR if set, otherwise default to "default_value"
 CONDA_PREFIX?=$(HOME)/miniconda3
 CONDA_SH_PATH?=$(CONDA_PREFIX)/etc/profile.d/conda.sh
-CONDA_ENV_NAME?=ambisplice
+CONDA_ENV_NAME?=contextsplice
 
 gpus=0
 debug=false
@@ -43,10 +43,10 @@ sbatch_redirect: ## Redirect the action to sbatch instead of interactive running
 
 install: ## Install python dependencies under conda environment
 	source $(CONDA_SH_PATH)
-	conda create -n $(CONDA_ENV_NAME) python=3.11 -y
+	conda create -n $(CONDA_ENV_NAME) python=3.13 -y
 	conda activate $(CONDA_ENV_NAME)
-	# Install PyTorch with CUDA 12.6 support
-	pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu126
+	# Install PyTorch with CUDA 12.8 support
+	pip install torch==2.7.1 torchvision==0.22.0 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 	pip install lightning
 	pip install lightning[extra]
 	conda install -c conda-forge pandas numpy hydra-core omegaconf wandb gputil matplotlib beartype h5py pytables -y

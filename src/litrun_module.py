@@ -14,7 +14,7 @@ from pytorch_lightning.loggers.wandb import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, Timer, LearningRateMonitor, RichProgressBar, TQDMProgressBar
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
-from AmbiSplice import visuals
+from . import visuals
 from . import utils
 from . import loss_metrics
 

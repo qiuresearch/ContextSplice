@@ -42,6 +42,11 @@ These files can be used to generate the original training data instead of repeat
 
 Note that some python scripts from Pangolin_train have been modified in order to run in newer python versions.
 
+### EnTEX RNA-seq and DNase-seq data
+
+
+## Data Processing Methods
+
 ### Spliser processing
 
 

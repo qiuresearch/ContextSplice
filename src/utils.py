@@ -14,7 +14,7 @@ import logging
 import numpy as np
 
 import torch
-from pytorch_lightning.utilities.rank_zero import rank_zero_only
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -84,8 +84,9 @@ def has_wandb_connectivity(host="api.wandb.ai", port=443, timeout=2.0):
 def get_pylogger(name=__name__) -> logging.Logger:
     """Initializes multi-GPU-friendly python command line logger."""
 
-    logger = logging.getLogger(name)
+    from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
+    logger = logging.getLogger(name)
     # this ensures all logging levels get marked with the rank zero decorator
     # otherwise logs would get multiplied for each GPU process in multi-GPU setup
     logging_levels = ("debug", "info", "warning", "error", "exception", "fatal", "critical")

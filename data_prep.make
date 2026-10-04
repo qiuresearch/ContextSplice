@@ -9,8 +9,8 @@ MAKEFLAGS += --always-make
 # Use ENV_VAR if set, otherwise default to "default_value"
 
 debug=false
-gpus=0
-cpus=$(shell echo "scale=0; m=$$(nproc)/2; if(m<12) m else 12" | bc)
+ngpus=0
+ncpus=$(shell echo "scale=0; m=$$(nproc)/2; if(m<12) m else 12" | bc)
 
 istart=0
 iend=999
@@ -31,8 +31,8 @@ help: # Display this help message
 	@echo "  iend=N (inclusive, default: $(iend))"
 	@echo "  profile=singularity|docker (default: $(profile))"
 	@echo "  use_parabricks_star=true|false (default: $(use_parabricks_star))"
-	@echo "  gpus=N (default: $(gpus))"
-	@echo "  cpus=N (default: $(cpus))"
+	@echo "  ngpus=N (default: $(ngpus))"
+	@echo "  ncpus=N (default: $(ncpus))"
 	@echo ""
 	@echo "  --- Options for sbatch=true ---"
 	@echo "  sbatch=true|false (default: $(sbatch))"
@@ -55,14 +55,14 @@ sbatch_redirect: # Redirect the target action to sbatch (sbatch=true)
 
 		until [ "$${final_end}" -lt $${chunk_start} ] ; do
 			chunk_end=$$((chunk_start + chunk_size - 1))
-			GOALOPT="istart=$${chunk_start} iend=$${chunk_end} profile=$(profile) cpus=$(cpus) gpus=$(gpus) debug=$(debug)"
+			GOALOPT="istart=$${chunk_start} iend=$${chunk_end} profile=$(profile) ncpus=$(ncpus) ngpus=$(ngpus) debug=$(debug)"
 			sbatch_file=sbatch
 			sbatch_cmds=(echo Starting...)
 			for goal in $(MAKECMDGOALS) ; do
 				sbatch_file=$${sbatch_file}_$${goal}_$${chunk_start}_$${chunk_end}
 				sbatch_cmds+=(\; make $${goal} $${GOALOPT})
 			done
-			sbatch_brew.sh -p $(partition) -t $(time) -ncpus $(cpus) -m $(mem) -o "$${sbatch_file}.sh" "$${sbatch_cmds[*]}"
+			sbatch_brew.sh -p $(partition) -t $(time) -ncpus $(ncpus) -m $(mem) -o "$${sbatch_file}.sh" "$${sbatch_cmds[*]}"
 			if command -v sbatch &> /dev/null ; then
 				echo "Submitting via sbatch ... (ignore the 'sbatch: error message)"
 				sbatch "$${sbatch_file}.sh"
@@ -142,8 +142,8 @@ nextflow_atacseq_batch: sbatch_redirect
 	ppl_nextflow.sh atacseq_run \
 		-profile $(profile) \
 		-use_parabricks_star $(use_parabricks_star) \
-		-cpus $(cpus) \
-		-gpus $(gpus) \
+		-cpus $(ncpus) \
+		-gpus $(ngpus) \
 		-data_dir $(data_dir) \
 		-out_dir $(out_dir) \
 		-url_list $(url_list) \
@@ -156,26 +156,31 @@ entex_nextflow_atacseq_batch: out_dir=entex/ATAC-seq_dataset
 entex_nextflow_atacseq_batch: url_list=$(data_dir)_cloud.urls
 entex_nextflow_atacseq_batch: nextflow_atacseq_batch ## EnTEX dataset ATAC-seq processing with nextflow
 
-entex_spliser_rnaseq: ## EnTEX dataset RNA-seq processing with SpliSer
+entex_spliser_rnaseq: sbatch_redirect ## EnTEX dataset RNA-seq processing with SpliSer
 	echo 'Skip collectBamStats...' || \
-	ppl_omics.sh spliser_collectBamStats \
+	ppl_nextflow.sh rnaseq_collectBamStats \
 		-home_dir entex \
 		-glob_file multiqc_fail_strand_check_table.txt \
-		-save_dir entex/spliser
+		-save_dir entex/spliser -h
 
 	echo 'Skip preCombineIntrons...' || \
-	ppl_omics.sh splier_preCombineIntrons \
+	ppl_spliser.sh preCombineIntrons \
+		-home_dir entex \
+		-bam_name '*.markdup.sorted.bam' \
+		-skip_bams '2,31' \
+		-gff3 spliser_refdata/gencode.v49.primary_assembly.annotation.gff3 \
+		-strand_opt ' --isStranded -s rf' \
+		-save_dir entex/spliser/combined
+
+	# echo 'Skip processBamFiles...' || \
+	ppl_spliser.sh processBamFiles \
 		-home_dir entex \
 		-bam_name '*.markdup.sorted.bam' \
 		-gff3 spliser_refdata/gencode.v49.primary_assembly.annotation.gff3 \
 		-strand_opt ' --isStranded -s rf' \
-		-save_dir entex/spliser
+		-intron_tsv entex/spliser/combined.introns.tsv \
+		-njobs $(ncpus) \
+		-istart $(istart) \
+		-iend $(iend) \
+		-debug $(debug)
 
-	# echo 'Skip processBamFiles...' || \
-	ppl_omics.sh spliser_processBamFiles \
-		-home_dir entex \
-		-bam_name '*.markdup.sorted.bam' \
-		-gff3 gencode.v49.primary_assembly.annotation.gff3 \
-		-strand_opt ' --isStranded -s rf' \
-		-intron_tsv entex/spliser.introns.tsv \
-		-ncpus $(cpus)

@@ -10,11 +10,11 @@ from omegaconf import DictConfig, OmegaConf, ListConfig
 import torch
 import torch.nn as nn
 
-from AmbiSplice import utils
-from AmbiSplice import models
-from AmbiSplice import datasets
-from AmbiSplice import litrun_module
-from AmbiSplice import litdata_module
+from src import utils
+from src import models
+from src import datasets
+from src import litrun_module
+from src import litdata_module
 
 ilogger = utils.get_pylogger(__name__)
 
