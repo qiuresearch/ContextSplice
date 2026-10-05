@@ -46,7 +46,8 @@ install: ## Install python dependencies under conda environment
 	conda create -n $(CONDA_ENV_NAME) python=3.13 -y
 	conda activate $(CONDA_ENV_NAME)
 	# Install PyTorch with CUDA 12.8 support
-	pip install torch==2.7.1 torchvision==0.22.0 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+# 	pip install torch==2.7.1 torchvision==0.22.0 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+	pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 	pip install lightning
 	pip install lightning[extra]
 	conda install -c conda-forge pandas numpy hydra-core omegaconf wandb gputil matplotlib beartype h5py pytables -y
