@@ -84,14 +84,16 @@ def has_wandb_connectivity(host="api.wandb.ai", port=443, timeout=2.0):
 def get_pylogger(name=__name__) -> logging.Logger:
     """Initializes multi-GPU-friendly python command line logger."""
 
-    from pytorch_lightning.utilities.rank_zero import rank_zero_only
-
     logger = logging.getLogger(name)
-    # this ensures all logging levels get marked with the rank zero decorator
-    # otherwise logs would get multiplied for each GPU process in multi-GPU setup
-    logging_levels = ("debug", "info", "warning", "error", "exception", "fatal", "critical")
-    for level in logging_levels:
-        setattr(logger, level, rank_zero_only(getattr(logger, level)))
+    try: 
+        # this ensures all logging levels get marked with the rank zero decorator
+        # otherwise logs would get multiplied for each GPU process in multi-GPU setup
+        from pytorch_lightning.utilities.rank_zero import rank_zero_only
+        logging_levels = ("debug", "info", "warning", "error", "exception", "fatal", "critical")
+        for level in logging_levels:
+            setattr(logger, level, rank_zero_only(getattr(logger, level)))
+    except ImportError:
+        logger.warning("PyTorch Lightning is not installed. Multi-GPU logging will not be available.")
 
     return logger
 

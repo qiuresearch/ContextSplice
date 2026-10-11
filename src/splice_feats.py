@@ -39,7 +39,7 @@ def reverse_complement(seq):
     return ''.join(complement.get(base, 'N') for base in reversed(seq))
 
 
-def sprinkle_sites_on_sequence(gene_sites, debug=False):
+def sprinkle_sites_on_sequence(gene_sites, icol=None, debug=False):
     """ Convert splice site positions and labels into vectors aligned with the RNA sequence """
 
     seq = gene_sites['seq']
@@ -49,6 +49,10 @@ def sprinkle_sites_on_sequence(gene_sites, debug=False):
     seq_cls_mask = np.zeros(len(seq), dtype=int)
     # pos is 0-based, pretty slow way to do this
     for pos, site_type, site_odds in zip(gene_sites['cls_pos'], gene_sites['cls_type'], gene_sites['cls_odds']):
+        if icol is not None:
+            site_type = site_type[icol]
+            site_odds = site_odds[icol]
+        
         seq_cls_odds[pos] = site_odds
         seq_cls_mask[pos] = 1
         if site_type == 'donor':
@@ -57,6 +61,8 @@ def sprinkle_sites_on_sequence(gene_sites, debug=False):
             seq_cls[pos] = 2 # acceptor
         elif site_type == 'hybrid':
             seq_cls[pos] = 3 # hybrid
+        elif site_type.upper() in ['NONE', 'NULL', 'UNK', 'UNKNOWN']:
+            seq_cls[pos] = 0 # no site
         else:
             raise ValueError(f"Invalid site type: {site_type}")
 
@@ -66,6 +72,9 @@ def sprinkle_sites_on_sequence(gene_sites, debug=False):
     seq_psi_mask = np.zeros(len(seq), dtype=int)
     # pos is 0-based, pretty slow way to do this
     for pos, psi, psi_std in zip(gene_sites['psi_pos'], gene_sites['psi'], gene_sites['psi_std']):
+        if icol is not None:
+            psi = psi[icol]
+            psi_std = psi_std[icol]
         seq_psi[pos] = psi
         seq_psi_std[pos] = psi_std
         seq_psi_mask[pos] = 1
