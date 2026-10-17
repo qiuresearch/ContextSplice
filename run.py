@@ -18,6 +18,12 @@ from src import litdata_module
 
 ilogger = utils.get_pylogger(__name__)
 
+def get_config_preview(cfg: DictConfig, max_items=5):
+    """ Get a preview of the model config for logging."""
+    return ", ".join(f"{key}={value!r}" for key, value in list(cfg.items())[:max_items]) + \
+            (", ..." if len(cfg) > max_items else "")
+
+
 def get_accelerator_devices(gpus=[0], matmul_precision='medium', deterministic=False):
     """ Get accelerator and devices for PyTorch Lightning Trainer."""
     if not isinstance(gpus, (list, tuple, ListConfig)):
@@ -71,7 +77,8 @@ def get_torch_model(model_cfg: DictConfig):
         else:
             raise ValueError(f"Unknown model type: {model_cfg.type}")
 
-    ilogger.info(f"Initialized model {model_cfg.type} with config") #:\n{OmegaConf.to_yaml(model_cfg)}")
+
+    ilogger.info(f"Initialized model with config: {get_config_preview(model_cfg)}")
 
     if model_cfg.state_dict_path is not None:
         state_dict_path = os.path.abspath(os.path.expanduser(model_cfg.state_dict_path))
@@ -94,7 +101,10 @@ def get_torch_datasets(dataset_cfg: DictConfig):
     if dataset_cfg.type.upper() == 'GeneSites'.upper():
         meta_df_path = dataset_cfg.train_path
         ilogger.info(f"Loading metadata from {meta_df_path}")
-        meta_df = pd.read_pickle(meta_df_path)
+        if meta_df_path.endswith('.parquet'):
+            meta_df = pd.read_parquet(meta_df_path)
+        elif meta_df_path.endswith('.pkl'):
+            meta_df = pd.read_pickle(meta_df_path)
 
         test_chroms = ['chr1', 'chr3', 'chr5', 'chr7', 'chr9']
         train_chroms = ['chr2', 'chr4', 'chr6', 'chr8', 'chr10',
@@ -110,7 +120,7 @@ def get_torch_datasets(dataset_cfg: DictConfig):
         train_list = []
         val_list = []
         for chrom, group in chrom_groups:
-            group = group.sort_values(by='len').reset_index(drop=True)
+            group = group.sort_values(by='len' if 'len' in group.columns else 'gene_span').reset_index(drop=True)
             val_list.append(group.iloc[::6])
             train_list.append(group.drop(group.index[::6]))
             # group = group.sample(frac=1, random_state=42)  # shuffle the group
@@ -197,7 +207,7 @@ def get_torch_datasets(dataset_cfg: DictConfig):
     else:
         raise ValueError(f"Unknown dataset type: {dataset_cfg.type}")
 
-    ilogger.info(f'Initialized datasets with config') # :\n{OmegaConf.to_yaml(dataset_cfg)}')
+    ilogger.info(f'Initialized datasets with config: {get_config_preview(dataset_cfg)}') # :\n{OmegaConf.to_yaml(dataset_cfg)}')
     return {'train': train_set, 'val': val_set, 'test': test_set, 'predict': predict_set}
 
 
@@ -207,13 +217,13 @@ def get_litdata(torch_datasets, datamodule_cfg: DictConfig):
                                        test_dataset=torch_datasets['test'],
                                        predict_dataset=torch_datasets['predict'],
                                        **datamodule_cfg)
-    ilogger.info(f"Initialized litdata with config") #:\n{OmegaConf.to_yaml(datamodule_cfg)}")
+    ilogger.info(f"Initialized litdata with config: {get_config_preview(datamodule_cfg)}") #:\n{OmegaConf.to_yaml(datamodule_cfg)}")
     return litdata
 
 
 def get_litrun(model: nn.Module, litrun_cfg: DictConfig):
     litrun = litrun_module.OmniRunModule(model=model, cfg=litrun_cfg)
-    ilogger.info(f"Initialized litrun with config") #:\n{OmegaConf.to_yaml(litrun_cfg)}")
+    ilogger.info(f"Initialized litrun with config: {get_config_preview(litrun_cfg)}") #:\n{OmegaConf.to_yaml(litrun_cfg)}")
     return litrun
 
 

@@ -39,7 +39,7 @@ def reverse_complement(seq):
     return ''.join(complement.get(base, 'N') for base in reversed(seq))
 
 
-def sprinkle_sites_on_sequence(gene_sites, icol=None, debug=False):
+def sprinkle_sites_on_sequence(gene_sites, n_classes=4, icol=None, debug=False):
     """ Convert splice site positions and labels into vectors aligned with the RNA sequence """
 
     seq = gene_sites['seq']
@@ -75,12 +75,12 @@ def sprinkle_sites_on_sequence(gene_sites, icol=None, debug=False):
         if icol is not None:
             psi = psi[icol]
             psi_std = psi_std[icol]
-        seq_psi[pos] = psi
+        seq_psi[pos] = psi if psi is not None and not np.isnan(psi) else 0.0
         seq_psi_std[pos] = psi_std
         seq_psi_mask[pos] = 1
 
     return {'seq': seq,
-            'cls': seq_cls,
+            'cls': seq_cls if n_classes > 3 else np.clip(seq_cls, 0, n_classes - 1),  # binary classification if n_classes <= 3
             'cls_odds': seq_cls_odds,
             'cls_mask': seq_cls_mask,
             'psi': seq_psi,

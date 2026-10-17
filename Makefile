@@ -13,11 +13,14 @@ CONDA_ENV_NAME?=contextsplice
 
 gpus=0
 debug=false
+train_epoch_len=null
+val_epoch_len=null
+test_epoch_len=null
+predict_epoch_len=200000
+
+train_batch_size=$(shell mem=$$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1); if [ "$${mem:-0}" -ge 16384 ] 2>/dev/null; then echo 96; else echo 64; fi)
+val_batch_size=$(shell echo $$(( $(train_batch_size) * 2 )))
 wandb=online
-train_len=null
-val_len=null
-test_len=null
-predict_len=200000
 
 sbatch=false
 partition=small-gpu
@@ -31,7 +34,8 @@ help: ## Display this help message
 
 sbatch_redirect: ## Redirect the action to sbatch instead of interactive running
 	@if [ -n "$${SLURM_JOB_ID}" ] ; then exit 0 ; fi
-	@GOALOPT="gpus=$(gpus) train_len=$(train_len) val_len=$(val_len) test_len=$(test_len) predict_len=$(predict_len) debug=$(debug)"
+	@GOALOPT="gpus=$(gpus) train_epoch_len=$(train_epoch_len) val_epoch_len=$(val_epoch_len) test_epoch_len=$(test_epoch_len) predict_epoch_len=$(predict_epoch_len) debug=$(debug)"
+	@GOALOPT+=" train_batch_size=$(train_batch_size) val_batch_size=$(val_batch_size) wandb=$(wandb)"
 	@if [ "$(sbatch)" = "true" ] ; then \
 		sbatch_file=sbatch ; sbatch_cmds=(echo Starting...) ; \
 		for goal in $(MAKECMDGOALS) ; do sbatch_file=$${sbatch_file}_$${goal} ; sbatch_cmds+=(\; make $${goal} $${GOALOPT}) ; done ; \
@@ -50,8 +54,24 @@ install: ## Install python dependencies under conda environment
 	pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 	pip install lightning
 	pip install lightning[extra]
-	conda install -c conda-forge pandas numpy hydra-core omegaconf wandb gputil matplotlib beartype h5py pytables -y
+	conda install -c conda-forge pandas psutil numpy hydra-core omegaconf wandb gputil matplotlib beartype h5py pytables pyarrow -y
 	conda install mappy -c bioconda -y
+
+
+train_pangolinsolo_gtex11_genesite: ## Train PangolinSolo model on GTEx v11 GeneSite dataset
+	conda run --no-capture-output --name $(CONDA_ENV_NAME) \
+	python -u run.py stage=train gpus=[$(gpus)] \
+		run_name=pangolinsolo.gtex11.genesite \
+		model.type=pangolinsolo \
+		model.state_dict_path=null \
+		dataset.type=genesites \
+		+dataset.tissue_types=[Blood] \
+		dataset.train_path=data/gtex_v11/genesite_cls_psi.parquet \
+		datamodule.train_batch_size=$(train_batch_size) \
+		datamodule.val_batch_size=$(val_batch_size) \
+		litrun.resume_from_ckpt=null \
+		debug=$(debug)
+
 
 test_pangolinomni3_pangolinsolo123: ## Evaluate PangolinOmni3 model trained on PangolinSolo123 dataset
 	ckpt_dir=checkpoints/pangolinomni3.pangolinsolo123_2025-11-11_00-04-02_97d417l3
@@ -71,7 +91,7 @@ test_pangolinomni3_pangolinsolo123: ## Evaluate PangolinOmni3 model trained on P
 			litrun.resume_from_ckpt=$${ckpt_path} \
 			dataset.type=pangolinsolo \
 			dataset.train_path=null \
-			dataset.predict_epoch_length=$(predict_len) \
+			dataset.predict_epoch_length=$(predict_epoch_len) \
 			dataset.predict_path=data/pangolin/dataset_test_1.h5 \
 			+dataset.tissue_types=[$${tissues[i]}] \
 			+dataset.tissue_embedding_path="data/tissue_avg_pca_embeddings.csv" \
@@ -95,7 +115,7 @@ test_pangolinomni2_pangolinsolo123: ## Evaluate PangolinOmni2 model trained on P
 			litrun.resume_from_ckpt="$${ckpt_path}" \
 			dataset.type=pangolinsolo \
 			dataset.train_path=null \
-			dataset.predict_epoch_length=$(predict_len) \
+			dataset.predict_epoch_length=$(predict_epoch_len) \
 			dataset.predict_path=data/pangolin/dataset_test_1.h5 \
 			+dataset.tissue_types=[$${tissues[i]}] \
 			+dataset.tissue_embedding_path="data/tissue_avg_pca_embeddings.csv" \
@@ -118,7 +138,7 @@ test_pangolinomni_pangolinsolo123: ## Evaluate PangolinOmni model trained on Pan
 			litrun.resume_from_ckpt=$${ckpt_dir}/best.ckpt \
 			dataset.type=pangolinsolo \
 			dataset.train_path=null \
-			dataset.predict_epoch_length=$(predict_len) \
+			dataset.predict_epoch_length=$(predict_epoch_len) \
 			dataset.predict_path=data/pangolin/dataset_test_1.h5 \
 			+dataset.tissue_types=[$${tissues[i]}] \
 			+dataset.tissue_embedding_path="data/tissue_avg_pca_embeddings.csv" \
@@ -141,7 +161,7 @@ test_pangolinsolo_pangolinsolo4: ## Evaluate PangolinSolo model trained on Pango
 			litrun.resume_from_ckpt=$${ckpt_path} \
 			dataset.type=pangolinsolo \
 			dataset.train_path=null \
-			dataset.predict_epoch_length=$(predict_len) \
+			dataset.predict_epoch_length=$(predict_epoch_len) \
 			dataset.predict_path=data/pangolin/dataset_test_1.h5 \
 			+dataset.tissue_types=[$${tissues[i]}] \
 			debug=$(debug)
@@ -163,7 +183,7 @@ test_pangolinsolo_pangolinsolo3: ## Evaluate PangolinSolo model trained on Pango
 			litrun.resume_from_ckpt=$${ckpt_path} \
 			dataset.type=pangolinsolo \
 			dataset.train_path=null \
-			dataset.predict_epoch_length=$(predict_len) \
+			dataset.predict_epoch_length=$(predict_epoch_len) \
 			dataset.predict_path=data/pangolin/dataset_test_1.h5 \
 			+dataset.tissue_types=[$${tissues[i]}] \
 			debug=$(debug)
@@ -185,7 +205,7 @@ test_pangolinsolo_pangolinsolo2: ## Evaluate PangolinSolo model trained on Pango
 			litrun.resume_from_ckpt=$${ckpt_path} \
 			dataset.type=pangolinsolo \
 			dataset.train_path=null \
-			dataset.predict_epoch_length=$(predict_len) \
+			dataset.predict_epoch_length=$(predict_epoch_len) \
 			dataset.predict_path=data/pangolin/dataset_test_1.h5 \
 			+dataset.tissue_types=[$${tissues[i]}] \
 			debug=$(debug)
@@ -208,7 +228,7 @@ test_pangolinsolo_pangolinsolo1: ## Evaluate PangolinSolo model trained on Pango
 			litrun.resume_from_ckpt=$${ckpt_path} \
 			dataset.type=pangolinsolo \
 			dataset.train_path=null \
-			dataset.predict_epoch_length=$(predict_len) \
+			dataset.predict_epoch_length=$(predict_epoch_len) \
 			dataset.predict_path=data/pangolin/dataset_test_1.h5 \
 			+dataset.tissue_types=[$${tissues[i]}] \
 			debug=$(debug)
@@ -233,7 +253,7 @@ test_pangolinsolo_pangolinsolo1: ## Evaluate PangolinSolo model trained on Pango
 # 			litrun.resume_from_ckpt=$${ckpt_names[j]} \
 # 			dataset.type=pangolinsolo \
 # 			dataset.train_path=null \
-# 			dataset.predict_epoch_length=$(predict_len) \
+# 			dataset.predict_epoch_length=$(predict_epoch_len) \
 # 			dataset.predict_path=data/pangolin/dataset_test_1.h5 \
 # 			+dataset.tissue_types=[$${tissues[i]}] \
 # 			debug=$(debug)
@@ -256,7 +276,7 @@ test_pangolinorig_ensemble_pangolin: ## Evaluate Pangolin original ensemble aver
 		ensemble.model.state_dict_path=[$${model_dir}/final.1.0.3,$${model_dir}/final.2.0.3,$${model_dir}/final.3.0.3,$${model_dir}/final.4.0.3,$${model_dir}/final.5.0.3] \
 	    dataset.type=pangolin \
 		dataset.predict_path=data/pangolin/dataset_test_1.h5 \
-		dataset.predict_epoch_length=$(predict_len) \
+		dataset.predict_epoch_length=$(predict_epoch_len) \
 		+dataset.tissue_types=[heart,liver,brain,testis] \
 		debug=$(debug)
 
@@ -271,7 +291,7 @@ test_pangolin_pangolin: ## Evaluate Pangolin model trained on Pangolin dataset (
 		litrun.resume_from_ckpt=$${ckpt_dir}/best.ckpt \
 		dataset.type=pangolin \
 		dataset.train_path=null \
-		dataset.predict_epoch_length=$(predict_len) \
+		dataset.predict_epoch_length=$(predict_epoch_len) \
 		dataset.predict_path=data/pangolin/dataset_test_1.h5 \
 		+dataset.tissue_types=[heart,liver,brain,testis] \
 		debug=$(debug)
@@ -295,7 +315,7 @@ test_pangolinorig_pangolin: ## Evaluate Pangolin original model
 			ensemble.enable=false \
 			dataset.type=pangolin \
 			dataset.predict_path=data/pangolin/dataset_test_1.h5 \
-			dataset.predict_epoch_length=$(predict_len) \
+			dataset.predict_epoch_length=$(predict_epoch_len) \
 			+dataset.tissue_types=[heart,liver,brain,testis] \
 			debug=$(debug)
 	done
@@ -309,8 +329,8 @@ train_pangolinsolo_pangolinsolo123: ## Train PangolinSolo model on PangolinSolo 
 		dataset.type=pangolinsolo \
 		+dataset.tissue_types=[heart,liver,brain] \
 		dataset.train_path=data/pangolin/dataset_train_all.h5 \
-		datamodule.train_batch_size=96 \
-		datamodule.val_batch_size=128 \
+		datamodule.train_batch_size=$(train_batch_size) \
+		datamodule.val_batch_size=$(val_batch_size) \
 		litrun.resume_from_ckpt=null \
 		debug=$(debug)
 
@@ -322,9 +342,14 @@ train_pangolinsolo_pangolinsolo124: ## Train PangolinSolo model on PangolinSolo 
 		model.state_dict_path=null \
 		dataset.type=pangolinsolo \
 		+dataset.tissue_types=[heart,liver,testis] \
-		dataset.train_path=data/pangolin/dataset_train_all.h5 \
-		datamodule.train_batch_size=96 \
-		datamodule.val_batch_size=128 \
+		dataset.train_path=data/pangolin_original/dataset_train_all.h5 \
+		dataset.train_epoch_length=$(train_epoch_len) \
+		dataset.val_epoch_length=$(val_epoch_len) \
+		dataset.test_epoch_length=$(test_epoch_len) \
+		dataset.predict_path=null \
+		dataset.predict_epoch_length=$(predict_epoch_len) \
+		datamodule.train_batch_size=$(train_batch_size) \
+		datamodule.val_batch_size=$(val_batch_size) \
 		litrun.resume_from_ckpt=null \
 		debug=$(debug)
 
@@ -336,7 +361,7 @@ train_pangolinsolo_pangolinsolo1: ## Train PangolinSolo model on PangolinSolo da
 		model.state_dict_path=null \
 		dataset.type=pangolinsolo \
 		+dataset.tissue_types=[heart] \
-		dataset.train_path=data/pangolin/dataset_train_all.h5 \
+		dataset.train_path=data/pangolin_original/dataset_train_all.h5 \
 		datamodule.train_batch_size=96 \
 		datamodule.val_batch_size=128 \
 		litrun.resume_from_ckpt=null \
@@ -423,11 +448,11 @@ train_pangolinomni3_pangolinsolo123: sbatch_redirect ## Train PangolinOmni3 mode
 		model.state_dict_path=null \
 		dataset.type=pangolinsolo \
 		dataset.train_path=data/pangolin/dataset_train_all.h5 \
-		dataset.train_epoch_length=$(train_len) \
-		dataset.val_epoch_length=$(val_len) \
-		dataset.test_epoch_length=$(test_len) \
+		dataset.train_epoch_length=$(train_epoch_len) \
+		dataset.val_epoch_length=$(val_epoch_len) \
+		dataset.test_epoch_length=$(test_epoch_len) \
 		dataset.predict_path=null \
-		dataset.predict_epoch_length=$(predict_len) \
+		dataset.predict_epoch_length=$(predict_epoch_len) \
 		+dataset.tissue_types=[heart,liver,brain] \
 		+dataset.tissue_embedding_path="data/tissue_avg_pca_embeddings.csv" \
 		datamodule.train_batch_size=96 \

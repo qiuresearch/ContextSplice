@@ -21,7 +21,6 @@ ensemble: # used for eval/test/predict only
     resume_from_ckpt:
       - null
 dataset:
-  debug: ${debug}
   stage: ${stage}
   type: PangolinSolo  # PangolinSolo, Pangolin, GeneSites, GeneCrops
   train_path: null
@@ -34,16 +33,16 @@ dataset:
   test_epoch_length: null
   predict_epoch_length: null
   enable_cache: false
-model:
   debug: ${debug}
+model:
   type: null
   dropout: 0.1
   loss: cls+psi
   loss_scale_cls: 0.5
   loss_scale_psi: 0.5
   state_dict_path: null
-datamodule: # Datamodule + Dataloader + Sampler configs
   debug: ${debug}
+datamodule: # Datamodule + Dataloader + Sampler configs
   train_batch_size: 64
   val_batch_size: 96
   test_batch_size: 96
@@ -55,8 +54,8 @@ datamodule: # Datamodule + Dataloader + Sampler configs
   batch_sampler: null
   num_workers: 4
   prefetch_factor: 7
-litrun:
   debug: ${debug}
+litrun:
   seed: 1234
   resume_from_ckpt: null
   resume_model_weights_only: true
@@ -106,3 +105,4 @@ litrun:
     mode: min
     every_n_epochs: 1
     every_n_train_steps: null
+  debug: ${debug}

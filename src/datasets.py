@@ -367,11 +367,12 @@ class GeneSitesDataset(Dataset):
     def __init__(
         self,
         genesites_df,
+        num_classes=2,
         epoch_length=None,
         tissue_types=None,
         dataset_name=None,
         pipe_genecrops=False, # whether to exhaust all gene crops before sampling the next gene
-        weighted_sampling='span',
+        weighted_sampling='gene_span',
         dynamic_weights=False,
         min_quality=None,
         stratified_sampling=None,
@@ -389,7 +390,7 @@ class GeneSitesDataset(Dataset):
             epoch_length (int, optional): Number of samples per epoch. Defaults to length of genesites_df.
             data_dir (str): Directory containing RNA structure files.
             pipe_genecrops (bool): Whether to exhaust all gene crops before sampling the next gene.
-            weighted_sampling (str): Sampling strategy ('span' or 'uniform').
+            weighted_sampling (str): Sampling strategy ('gene_span' or 'uniform').
             dynamic_weights (bool): Update weights dynamically during training.
             min_quality (float): Minimum quality threshold for samples.
             stratified_sampling (str, optional): Column name for stratified sampling. If None, no stratification.
@@ -419,6 +420,7 @@ class GeneSitesDataset(Dataset):
             raise ValueError("genesites_df must be a pandas DataFrame or file name.")
 
         self.genesites_df = genesites_df.reset_index(drop=True)
+        self.num_classes = num_classes
         self.epoch_length = len(genesites_df) if epoch_length is None else epoch_length
         self.random_seed = random_seed
         self.iterations = 0
@@ -428,9 +430,15 @@ class GeneSitesDataset(Dataset):
 
         self.tissue_types = tissue_types
         if self.tissue_types is not None:
-            self.tissue_cols = get_gtex_tissue_cols(self.tissue_types)[0]
-        else:
-            self.tissue_cols = None
+            self.tissue_cols = get_gtex_tissue_cols(self.tissue_types)
+            if len(self.tissue_cols) == 0:
+                ilogger.warning(f"tissue_types: {self.tissue_types} must contain at least one valid tissue type.")
+                self.tissue_cols = None
+            elif len(self.tissue_cols) > 1:
+                ilogger.warning(f"Multiple tissue types specified: {self.tissue_types}. Using the first tissue type for sampling.")
+                self.tissue_cols = self.tissue_cols[0]  # Use the first tissue column for sampling
+            else:
+                self.tissue_cols = self.tissue_cols[0]  # only one tissue type, use its column index
 
         self.training = training
         self.min_quality = min_quality
@@ -496,9 +504,10 @@ class GeneSitesDataset(Dataset):
             print(f"            min_quality: {self.min_quality}")
             print(f"    customized_sampling: {self.customized_sampling}")
             print(f"    stratified_sampling: {self.stratified_sampling}")
-            print(
-                f"     stratified_ngroups: {self.stratified_ngroups}, e.g., {self.stratified_names[:5]}..."
-            )
+            if self.stratified_sampling:
+                print(
+                    f"     stratified_ngroups: {self.stratified_ngroups}, e.g., {self.stratified_names[:5]}..."
+                )
             print(f"      weighted_sampling: {self.weighted_sampling}")
             print(f"        dynamic_weights: {self.dynamic_weights}")
             # print(f"    sampling_method: {self.sampling_method if self.sampling_method else 'None'}")
@@ -574,6 +583,7 @@ class GeneSitesDataset(Dataset):
             gene_ds = self.genesites_df.iloc[idx]
             gene_feat = splice_feats.sprinkle_sites_on_sequence(
                 gene_ds,
+                n_classes=self.num_classes,
                 icol=self.tissue_cols,
                 # training=self.training,
             )
