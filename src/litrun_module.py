@@ -61,7 +61,7 @@ def save_epoch_metrics(epoch_metrics, save_path):
         print("No epoch metrics to save.")
         return
 
-    if not os.path.exists(os.path.dirname(save_path)):
+    if not os.path.exists(os.path.dirname(save_path)) and not os.path.isdir(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         
     with open(save_path, 'w') as f:
@@ -73,7 +73,7 @@ def save_epoch_metrics(epoch_metrics, save_path):
 
 def save_model_outputs(feats, preds, save_path, pruning=True):
     """ Save model outputs (features and predictions) to a file. """
-    if not os.path.exists(os.path.dirname(save_path)):
+    if not os.path.exists(os.path.dirname(save_path)) and not os.path.isdir(os.path.dirname(save_path)):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
     if pruning:

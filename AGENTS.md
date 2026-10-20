@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Agent instructions for AmbiSplice contributors.
+Agent instructions for ContextSplice contributors.
 
 ## First Read
 
@@ -12,7 +12,7 @@ Agent instructions for AmbiSplice contributors.
 
 - List available workflows:
   - `make help`
-- Install dependencies (conda env `ambisplice` by default):
+- Install dependencies (conda env `contextsplice` by default):
   - `make install`
 - Typical training entrypoint (through Make target):
   - `make train_pangolinomni3_pangolinsolo123`
@@ -26,11 +26,11 @@ Prefer existing Make targets instead of inventing new command lines when reprodu
 - Main entrypoint: [run.py](run.py)
   - Uses Hydra (`config.yaml`) and dispatches by `stage` (`train`/`eval`/`predict`).
   - Builds model, datasets, Lightning module, and datamodule.
-- Core package: [AmbiSplice](AmbiSplice)
-  - Models: [AmbiSplice/models.py](AmbiSplice/models.py)
-  - Datasets: [AmbiSplice/datasets.py](AmbiSplice/datasets.py)
-  - Lightning run module: [AmbiSplice/litrun_module.py](AmbiSplice/litrun_module.py)
-  - Lightning data module: [AmbiSplice/litdata_module.py](AmbiSplice/litdata_module.py)
+- Core package: [src](src)
+  - Models: [src/models.py](src/models.py)
+  - Datasets: [src/datasets.py](src/datasets.py)
+  - Lightning run module: [src/litrun_module.py](src/litrun_module.py)
+  - Lightning data module: [src/litdata_module.py](src/litdata_module.py)
 
 ## Repo Conventions For Agents
 
@@ -43,7 +43,7 @@ Prefer existing Make targets instead of inventing new command lines when reprodu
   - [outputs](outputs)
   - [lightning_logs](lightning_logs)
   - dataset blobs under [data](data)
-- Notebooks are used heavily for data prep and evaluation; if changing shared logic, prefer package modules under [AmbiSplice](AmbiSplice) and keep notebook edits minimal.
+- Notebooks are used heavily for data prep and evaluation; if changing shared logic, prefer package modules under [src](src) and keep notebook edits minimal.
 
 ## Validation Expectations
 
@@ -54,8 +54,8 @@ Prefer existing Make targets instead of inventing new command lines when reprodu
 ## Common Pitfalls
 
 - `run.py` checks requested GPUs against `GPUtil.getAvailable(...)`; invalid GPU selections raise a hard error.
-- Several workflows assume large HDF5 inputs already exist (for example under `data/pangolin`). Missing paths fail at dataset initialization.
-- Stage-specific dataset requirements are strict in [run.py](run.py) and [AmbiSplice/datasets.py](AmbiSplice/datasets.py):
+- Several workflows assume large HDF5 inputs already exist (for example under `data/pangolin_original`). Missing paths fail at dataset initialization.
+- Stage-specific dataset requirements are strict in [run.py](run.py) and [src/datasets.py](src/datasets.py):
   - training expects `dataset.train_path`
   - eval/predict expect `dataset.predict_path`
 - Some training/eval targets are designed for SLURM via `sbatch_redirect`; avoid changing scheduler behavior unless requested.

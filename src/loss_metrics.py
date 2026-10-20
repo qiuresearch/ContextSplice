@@ -67,7 +67,7 @@ def calc_topk_roc_prc_curves(y_pred, y_true, ks=(0.5, 1, 2, 4), multiples_of_tru
     for key in all_metrics:
         all_metrics[key] = np.array(all_metrics[key])
 
-    # auprc
+    # auprc (TODO: group equal scores before computing precision-recall curve?)
     # quantile indices
     idx_thresholds = np.linspace(0, len(y_pred) - 1, num=min(len(y_true), 101), dtype=int)
     # linear space indices
