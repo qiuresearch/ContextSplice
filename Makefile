@@ -17,6 +17,7 @@ train_epoch_len=null
 val_epoch_len=null
 test_epoch_len=null
 predict_epoch_len=200000
+tissue=blood
 
 train_batch_size=$(shell mem=$$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1); if [ "$${mem:-0}" -ge 16384 ] 2>/dev/null; then echo 96; else echo 64; fi)
 val_batch_size=$(shell echo $$(( $(train_batch_size) * 2 )))
@@ -29,6 +30,20 @@ time=7-00:00:00
 help: ## Display this help message
 	@echo "Usage: make <target>"
 	@echo
+	@echo "run.py options:"
+	@echo -e "  \033[36mtrain_epoch_len\033[0m=<train_epoch_len> (default: $(train_epoch))"
+	@echo -e "  \033[36mval_epoch_len\033[0m=<val_epoch_len> (default: $(val_epoch))"
+	@echo -e "  \033[36mtest_epoch_len\033[0m=<test_epoch_len> (default: $(test_epoch))"
+	@echo -e "  \033[36mpredict_epoch_len\033[0m=<predict_epoch_len> (default: $(predict_epoch))"
+	@echo -e "  \033[36mlr\033[0m=<learning_rate> (default: $(lr))"
+	@echo -e "  \033[36mgpus\033[0m=<gpus> e.g., 0,1,2,3 (default: $(gpus))"
+	@echo -e "  \033[36mdebug\033[0m=<true/false> (default: $(debug))"
+	@echo
+	@echo "sbatch options:"
+	@echo -e "  \033[36msbatch\033[0m=<true/false> (default: $(sbatch))"
+	@echo -e "  \033[36mpartition\033[0m=<partition> (default: $(partition))"
+	@echo -e "  \033[36mtime\033[0m=<time> (default: $(time))"
+	@echo	
 	@echo "Available targets:"
 	@grep -E '^[0-9a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-42s\033[0m %s\n", $$1, $$2}'
 
@@ -50,22 +65,36 @@ install: ## Install python dependencies under conda environment
 	conda create -n $(CONDA_ENV_NAME) python=3.13 -y
 	conda activate $(CONDA_ENV_NAME)
 	# Install PyTorch with CUDA 12.8 support
-# 	pip install torch==2.7.1 torchvision==0.22.0 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+	# 	pip install torch==2.7.1 torchvision==0.22.0 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 	pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 	pip install lightning
 	pip install lightning[extra]
 	conda install -c conda-forge pandas psutil numpy hydra-core omegaconf wandb gputil matplotlib beartype h5py pytables pyarrow -y
 	conda install mappy -c bioconda -y
 
+train_contextsplice_gtex11_genesite: ## Train ContextSplice model on GTEx v11 GeneSite dataset
+	conda run --no-capture-output --name $(CONDA_ENV_NAME) \
+	python -u run.py stage=train gpus=[$(gpus)] \
+		run_name=contextsplice.gtex11.multi \
+		model.type=contextsplicefilm \
+		model.state_dict_path=null \
+		dataset.type=genesites \
+		dataset.train_path=data/gtex_v11/genesite_cls_psi.parquet \
+		+dataset.tissue_embedding_path="data/gtex_v11/gene_logcpm_batcorrected_top128.csv" \
+		+dataset.tissue_types=[Blood,Brain,Heart,Liver,Testis] \
+		datamodule.train_batch_size=$(train_batch_size) \
+		datamodule.val_batch_size=$(val_batch_size) \
+		litrun.resume_from_ckpt=null \
+		debug=$(debug)
 
 train_pangolinsolo_gtex11_genesite: ## Train PangolinSolo model on GTEx v11 GeneSite dataset
 	conda run --no-capture-output --name $(CONDA_ENV_NAME) \
 	python -u run.py stage=train gpus=[$(gpus)] \
-		run_name=pangolinsolo.gtex11.genesite \
+		run_name=pangolinsolo.gtex11.$(tissue) \
 		model.type=pangolinsolo \
 		model.state_dict_path=null \
 		dataset.type=genesites \
-		+dataset.tissue_types=[Blood] \
+		+dataset.tissue_types=[$(tissue)] \
 		dataset.train_path=data/gtex_v11/genesite_cls_psi.parquet \
 		datamodule.train_batch_size=$(train_batch_size) \
 		datamodule.val_batch_size=$(val_batch_size) \

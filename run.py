@@ -18,7 +18,7 @@ from src import litdata_module
 
 ilogger = utils.get_pylogger(__name__)
 
-def get_config_preview(cfg: DictConfig, max_items=5):
+def get_config_preview(cfg: DictConfig, max_items=3):
     """ Get a preview of the model config for logging."""
     return ", ".join(f"{key}={value!r}" for key, value in list(cfg.items())[:max_items]) + \
             (", ..." if len(cfg) > max_items else "")
@@ -48,7 +48,7 @@ def get_accelerator_devices(gpus=[0], matmul_precision='medium', deterministic=F
     return accelerator, devices
 
 
-def get_torch_model(model_cfg: DictConfig):
+def get_model(model_cfg: DictConfig):
     """ Initialize model from config."""
     L = 32
     W = np.asarray([11, 11, 11, 11, 11, 11, 11, 11,
@@ -66,10 +66,10 @@ def get_torch_model(model_cfg: DictConfig):
         torch_model = models.PangolinSolo(L=L, W=W, AR=AR, **model_cfg)
     elif model_cfg.type.upper() == 'PangolinOmni'.upper():
         torch_model = models.PangolinOmni(L=L, W=W, AR=AR, **model_cfg)
-    elif model_cfg.type.upper() == 'PangolinOmni2'.upper():
-        torch_model = models.PangolinOmni2(L=L, W=W, AR=AR, **model_cfg)
     elif model_cfg.type.upper() == 'PangolinOmni3'.upper():
         torch_model = models.PangolinOmni3(L=L, W=W, AR=AR, **model_cfg)
+    elif model_cfg.type.upper() == 'ContextSpliceFilM'.upper():
+        torch_model = models.ContextSpliceFiLM(L=L, W=W, AR=AR, **model_cfg)
     else:
         if hasattr(models, model_cfg.type):
             model_class = getattr(models, model_cfg.type)
@@ -78,7 +78,7 @@ def get_torch_model(model_cfg: DictConfig):
             raise ValueError(f"Unknown model type: {model_cfg.type}")
 
 
-    ilogger.info(f"Initialized model with config: {get_config_preview(model_cfg)}")
+    ilogger.info(f"Return model with config: {get_config_preview(model_cfg)}")
 
     if model_cfg.state_dict_path is not None:
         state_dict_path = os.path.abspath(os.path.expanduser(model_cfg.state_dict_path))
@@ -90,7 +90,7 @@ def get_torch_model(model_cfg: DictConfig):
     return torch_model
 
 
-def get_torch_datasets(dataset_cfg: DictConfig):
+def get_datasets(dataset_cfg: DictConfig):
     """ Prepare training, validation, and prediction datasets."""
 
     train_set, val_set, test_set, predict_set = None, None, None, None
@@ -132,9 +132,9 @@ def get_torch_datasets(dataset_cfg: DictConfig):
         val_df = pd.concat(val_list).reset_index(drop=True)
 
         # show the sizes of the datasets
-        print(f"Train set size: {len(train_df)}")
-        print(f"Validation set size: {len(val_df)}")
-        print(f"Test set size: {len(test_df)}")
+        print(f"Train set size: {len(train_df)} with chroms: {train_df['chrom'].unique()}")
+        print(f"Validation set size: {len(val_df)} with chroms: {val_df['chrom'].unique()}")
+        print(f"Test set size: {len(test_df)} with chroms: {test_df['chrom'].unique()}")
 
         train_set = datasets.GeneSitesDataset(train_df, epoch_length=dataset_cfg.train_epoch_length, summarize=True, **dataset_cfg)
         val_set = datasets.GeneSitesDataset(val_df, epoch_length=dataset_cfg.val_epoch_length, summarize=False, **dataset_cfg)
@@ -207,7 +207,7 @@ def get_torch_datasets(dataset_cfg: DictConfig):
     else:
         raise ValueError(f"Unknown dataset type: {dataset_cfg.type}")
 
-    ilogger.info(f'Initialized datasets with config: {get_config_preview(dataset_cfg)}') # :\n{OmegaConf.to_yaml(dataset_cfg)}')
+    ilogger.info(f'Return datasets with config: {get_config_preview(dataset_cfg)}') # :\n{OmegaConf.to_yaml(dataset_cfg)}')
     return {'train': train_set, 'val': val_set, 'test': test_set, 'predict': predict_set}
 
 
@@ -217,13 +217,13 @@ def get_litdata(torch_datasets, datamodule_cfg: DictConfig):
                                        test_dataset=torch_datasets['test'],
                                        predict_dataset=torch_datasets['predict'],
                                        **datamodule_cfg)
-    ilogger.info(f"Initialized litdata with config: {get_config_preview(datamodule_cfg)}") #:\n{OmegaConf.to_yaml(datamodule_cfg)}")
+    ilogger.info(f"Return litdata with config: {get_config_preview(datamodule_cfg)}") #:\n{OmegaConf.to_yaml(datamodule_cfg)}")
     return litdata
 
 
 def get_litrun(model: nn.Module, litrun_cfg: DictConfig):
     litrun = litrun_module.OmniRunModule(model=model, cfg=litrun_cfg)
-    ilogger.info(f"Initialized litrun with config: {get_config_preview(litrun_cfg)}") #:\n{OmegaConf.to_yaml(litrun_cfg)}")
+    ilogger.info(f"Return litrun with config: {get_config_preview(litrun_cfg, max_items=3)}") #:\n{OmegaConf.to_yaml(litrun_cfg)}")
     return litrun
 
 
@@ -257,7 +257,7 @@ def get_ensemble_litruns(main_cfg, model=None):
     # get the list of models (which may be the same model)
     if model_cfgs:
         assert len(model_cfgs) == ensemble_size, "Length of ensemble.model does not match ensemble size!"
-        models = [get_torch_model(OmegaConf.merge(main_cfg.model, OmegaConf.create(cfg))) for cfg in model_cfgs]
+        models = [get_model(OmegaConf.merge(main_cfg.model, OmegaConf.create(cfg))) for cfg in model_cfgs]
     else:
         models = [model for _ in range(ensemble_size)]
     # get the list of litrun (which may be the same litrun)
@@ -301,10 +301,10 @@ def main(main_cfg: DictConfig):
     OmegaConf.set_struct(main_cfg, False)  # allow new attribute assignment
     accelerator, devices = get_accelerator_devices(gpus=main_cfg.gpus)
 
-    torch_model = get_torch_model(main_cfg.model)
+    torch_model = get_model(main_cfg.model)
     litrun = get_litrun(torch_model, main_cfg.litrun)
 
-    torch_datasets = get_torch_datasets(main_cfg.dataset)
+    torch_datasets = get_datasets(main_cfg.dataset)
     litdata = get_litdata(torch_datasets, main_cfg.datamodule)
 
     if main_cfg.stage in ('train', 'training', 'fit'):

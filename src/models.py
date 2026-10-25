@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 
+# number of channels in the convolutional layers
 L = 32
 # convolution window size in residual units
 W = np.asarray([11, 11, 11, 11, 11, 11, 11, 11,
@@ -56,6 +57,7 @@ class SpliceBaseModule(nn.Module):
 
         avg_losses = {}
         if 'cls' not in labels or 'psi' not in labels:
+            print("Missing labels for loss calculation, returning -1")
             return -1, avg_losses
         
         # four classes: non, acceptor, donor, hybrid
@@ -74,7 +76,7 @@ class SpliceBaseModule(nn.Module):
         train_loss = avg_losses['cls_loss'] + avg_losses['psi_loss']
         avg_losses['loss'] = train_loss
 
-        for k in avg_losses: # Move to CPU here, because of too large epoch length
+        for k in avg_losses: # Move to CPU here, because of long epoch
             avg_losses[k] = avg_losses[k].detach().cpu()
 
         return train_loss, avg_losses
@@ -112,7 +114,7 @@ class SpliceBaseModule(nn.Module):
         psi_pred = torch.sigmoid(preds['psi_logits'])  # (B, crop_size)
         avg_metrics['psi_mse'] = F.mse_loss(psi_pred, labels['psi'], reduction='mean')
 
-        for k in avg_metrics: # do not move to cpu here, let the caller do it
+        for k in avg_metrics: # Move to CPU here, because of long epoch
             avg_metrics[k] = avg_metrics[k].detach().cpu()
 
         return avg_metrics
@@ -136,6 +138,7 @@ class SpliceBaseModule(nn.Module):
     
 
 class SpliceSolo(SpliceBaseModule):
+    """ Only one change from PangolinSolo: output channels increased from 2 to 4 for CLS """
     def __init__(self, L=L, W=W, AR=AR, **kwargs):
         super(SpliceSolo, self).__init__()
 
@@ -181,16 +184,19 @@ class SpliceSolo(SpliceBaseModule):
         return {'cls_logits': out1, 'psi_logits': out2.squeeze(dim=1)}
 
 
-class PangolinOmni2(SpliceBaseModule):
-    """ Only one change from PangolinSolo: input channels increased from 4 to 36 """
-    def __init__(self, L, W, AR, **kwargs):
-        super(PangolinOmni2, self).__init__()
+class ContextSpliceFiLM(SpliceBaseModule):
+    """ Multi-layer FiLM: a shared context embedding Z_c (2-layer MLP over the
+        regulator vector) is projected per residual block into (gamma_l, beta_l),
+        which modulate that block's output: H_l = gamma_l * H_l + beta_l.
+        ResBlock internals are unchanged. """
+    def __init__(self, L, W, AR, context_dim=128, film_hidden=64, **kwargs):
+        super(ContextSpliceFiLM, self).__init__()
         self.n_chans = L
         self.conv1 = nn.Conv1d(4, L, 1) # in_channels, out_channels, kernel_size
-        self.conv2 = nn.Conv1d(32, L, 1)
+        # self.conv2 = nn.Conv1d(32, L, 1)
 
         self.bn1 = nn.BatchNorm1d(L)
-        self.bn2 = nn.BatchNorm1d(L)
+        # self.bn2 = nn.BatchNorm1d(L)
 
         self.skip = nn.Conv1d(L, L, 1)
         self.resblocks, self.convs = nn.ModuleList(), nn.ModuleList()
@@ -198,6 +204,13 @@ class PangolinOmni2(SpliceBaseModule):
             self.resblocks.append(ResBlock(L, W[i], AR[i]))
             if (((i + 1) % 4 == 0) or ((i + 1) == len(W))):
                 self.convs.append(nn.Conv1d(L, L, 1))
+                
+        self.film_mlp = nn.Sequential(
+            nn.Linear(context_dim, film_hidden), nn.ReLU(),
+            nn.Linear(film_hidden, film_hidden), nn.ReLU())
+        self.film_projs = nn.ModuleList(
+            [nn.Linear(film_hidden, 2 * L) for _ in range(len(W))])
+
         self.conv_last1 = nn.Conv1d(L, 2, 1)
         self.conv_last2 = nn.Conv1d(L, 1, 1)
         self.init_weights()
@@ -205,17 +218,28 @@ class PangolinOmni2(SpliceBaseModule):
     def init_weights(self):
         nn.init.constant_(self.conv_last2.weight, 0.0)
         nn.init.constant_(self.conv_last2.bias, -5.0)
+        # start FiLM as identity: gamma = 1, beta = 0
+        for proj in self.film_projs:
+            nn.init.zeros_(proj.weight)
+            nn.init.zeros_(proj.bias)
 
     def forward(self, batch_feats):
         x = batch_feats['seq_onehot']
+
+        reg_gene = batch_feats['reg_context']  # (B, context_dim)
+        if reg_gene.dim() == 3:
+            reg_gene = reg_gene.mean(dim=-1)
+        z_c = self.film_mlp(reg_gene)
             
         conv = self.bn1(self.conv1(x[:, :4, :]))
-        conv += self.bn2(self.conv2(x[:, 4:, :]))
+        # conv += self.bn2(self.conv2(x[:, 4:, :]))
 
         skip = self.skip(conv)
         j = 0
         for i in range(len(W)):
             conv = self.resblocks[i](conv)
+            gamma, beta = self.film_projs[i](z_c).chunk(2, dim=-1)
+            conv = (1 + gamma).unsqueeze(-1) * conv + beta.unsqueeze(-1)
             if (((i + 1) % 4 == 0) or ((i + 1) == len(W))):
                 dense = self.convs[j](conv)
                 j += 1
@@ -322,6 +346,7 @@ class PangolinOmni(SpliceBaseModule):
     
 
 class PangolinSolo(SpliceBaseModule):
+    """ Only one change from Pangolin: output one tissue type only """
     def __init__(self, L, W, AR, **kwargs):
         super(PangolinSolo, self).__init__()
         self.n_chans = L
@@ -363,6 +388,7 @@ class PangolinSolo(SpliceBaseModule):
     
 
 class Pangolin(SpliceBaseModule):
+    """ Orignal Pangolin model with multiple tissue types """
     def __init__(self, L, W, AR, **kwargs):
         super(Pangolin, self).__init__()
         self.n_chans = L

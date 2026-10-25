@@ -1,18 +1,21 @@
 # ---- Helper Functions ----
+import math
+
 import numpy as np
 
-# ---- One-hot encoding dictionary ----
+# ---- Onehot encoding dictionary ----
 BASE_DICT = {'A': [1, 0, 0, 0],
              'C': [0, 1, 0, 0],
              'G': [0, 0, 1, 0],
              'T': [0, 0, 0, 1],
+             'U': [0, 0, 0, 1],
              'N': [0, 0, 0, 0]}
 
 def onehot_encode_CL(seq): # CL --> return in shape [C, L]
     return np.array([BASE_DICT.get(base.upper(), [0, 0, 0, 0]) for base in seq]).T
 
 
-def decode_one_hot_old(array):
+def decode_onehot_old(array):
     index_to_base = {tuple([1, 0, 0, 0]): 'A',
                      tuple([0, 1, 0, 0]): 'C',
                      tuple([0, 0, 1, 0]): 'G',
@@ -89,9 +92,9 @@ def sprinkle_sites_on_sequence(gene_sites, n_classes=4, icol=None, debug=False):
             }
 
 
-def get_crop_feats_from_single_seq(seq_feat, num_crops=None, 
+def get_crop_feats_from_single_seq(seq_feat, stochastic_crops=True,
                                    crop_size=5000, flank_size=5000,
-                                   min_sites=0, min_usage=0,
+                                   min_cls_sites=0, min_psi_usage=0,
                                    debug=False):
     """ Generate crop features for a single RNA transcript by croping the sequence
     Args:
@@ -99,41 +102,57 @@ def get_crop_feats_from_single_seq(seq_feat, num_crops=None,
         num_crops: int, number of crops to generate, if None, generate all possible crops
         crop_size: int, size of the crop (excluding flanking regions)
         flank_size: int, size of the flanking regions on each side
-        min_sites: int, minimum number of splice sites in the crop to be included
-        min_usage: float, minimum total usage (psi) in the crop to be included
+        min_cls_sites: int, minimum number of splice sites in the crop to be included
+        min_psi_usage: float, minimum total usage (psi) in the crop to be included
         debug: bool, whether to print debug information
     """
     seq = seq_feat['seq']
-    # dtypes set to be correct for model input
-    # caution: lower precisions used for saving .h5 files whenever possible
-    seq_cls = seq_feat['cls'].astype(np.int64)
-    seq_cls_odds = seq_feat['cls_odds'].astype(np.float32)
-    seq_cls_mask = seq_feat['cls_mask'].astype(np.int32)
-    seq_psi = seq_feat['psi'].astype(np.float32)
-    seq_psi_std = seq_feat['psi_std'].astype(np.float32)
-    seq_psi_mask = seq_feat['psi_mask'].astype(np.int32)
-
-    total_size = crop_size + 2 * flank_size
-
-    # divide gene_list into crops of crop_size
     seq_len = len(seq)
-    crop_starts = np.arange(0, seq_len, crop_size, dtype=np.int32)
-    crop_starts[-1] = max([0, seq_len - crop_size])  # ensure last crop reaches the end
 
+    half_crop_size = crop_size // 2
+    if stochastic_crops:
+        num_crops = max(1, int(math.ceil(seq_len / crop_size)))
+        crop_centers = np.random.randint(0, seq_len, size=num_crops, dtype=np.int32)
+        crop_starts = crop_centers - half_crop_size
+    else:
+        crop_starts = np.arange(0, seq_len, crop_size, dtype=np.int32)
     crop_ends = crop_starts + crop_size
-    crop_ends[-1] = seq_len  # ensure last crop reaches the end
+    
+    crop_starts = np.clip(crop_starts, 0, seq_len)
+    crop_ends = np.clip(crop_ends, 0, seq_len)
 
     if debug:
         print(f"Seq Length: {seq_len}\ncrop starts: {crop_starts}\ncrop ends: {crop_ends}")
 
-    # randomly pick num_crops pairs of crop_starts and crop_ends
-    if num_crops is not None and num_crops > 0 and num_crops < len(crop_starts):
-        selected_indices = np.random.choice(len(crop_starts), size=num_crops, replace=False)
-        crop_starts = crop_starts[selected_indices]
-        crop_ends = crop_ends[selected_indices]
-        
+    # dtypes set to be correct for model input
+    # caution: lower precisions used for saving .h5 files whenever possible
+    if 'cls' in seq_feat and "psi" in seq_feat:
+        seq_cls = seq_feat['cls'].astype(np.int64)
+        seq_cls_odds = seq_feat['cls_odds'].astype(np.float32)
+        seq_cls_mask = seq_feat['cls_mask'].astype(np.int32)
+        seq_psi = seq_feat['psi'].astype(np.float32)
+        seq_psi_std = seq_feat['psi_std'].astype(np.float32)
+        seq_psi_mask = seq_feat['psi_mask'].astype(np.int32)
+    else:
+        seq_cls = np.zeros(seq_len, dtype=np.int64)
+        seq_cls_odds = np.zeros(seq_len, dtype=np.float32)
+        seq_cls_mask = np.zeros(seq_len, dtype=np.int32)
+        seq_psi = np.zeros(seq_len, dtype=np.float32)
+        seq_psi_std = np.zeros(seq_len, dtype=np.float32)
+        seq_psi_mask = np.zeros(seq_len, dtype=np.int32)
+
     crop_feats = []
+    total_size = crop_size + 2 * flank_size
     for crop_start, crop_end in zip(crop_starts, crop_ends):
+
+        if min_cls_sites and np.count_nonzero(seq_cls[crop_start:crop_end]) < min_cls_sites:
+            # print(f"Skipping gene_id: {train_feat['gene_id']}; start: {train_feat['start']}; end: {train_feat['end']} with <= {min_cls_sites} splice sites!")
+            continue
+
+        if min_psi_usage and np.count_nonzero(seq_psi[crop_start:crop_end]) < min_psi_usage:
+            # print(f"Skipping gene_id: {train_feat['gene_id']}; start: {train_feat['start']}; end: {train_feat['end']} with <= {min_psi_usage} usage!")
+            continue
+
         # crop_end - crop_start <= crop_size always (< if gene is shorter than crop_size)
         crop_feat = {'crop_start': crop_start, 'crop_end': crop_end}
 
@@ -143,6 +162,7 @@ def get_crop_feats_from_single_seq(seq_feat, num_crops=None,
 
         pad_size = total_size - (seq_end - seq_start)
         left_pad = flank_size - (crop_start - seq_start)
+        left_pad += half_crop_size - (crop_end - crop_start) // 2 # center the crop
         right_pad = pad_size - left_pad
         
         # pad with 'N's if needed for input X
@@ -171,14 +191,6 @@ def get_crop_feats_from_single_seq(seq_feat, num_crops=None,
         # y_start = left_pad + (crop_start - seq_start) - flank_size
         # y_end = y_start + (crop_end - crop_start)
         # train_feat['crop_mask'][y_start:y_end] = 1
-
-        if min_sites and np.sum(crop_feat['cls'][:crop_end-crop_start]) <= min_sites:
-            # print(f"Skipping gene_id: {train_feat['gene_id']}; start: {train_feat['start']}; end: {train_feat['end']} with <= {min_sites} splice sites!")
-            continue
-
-        if min_usage and np.sum(crop_feat['psi'][:crop_end-crop_start]) < min_usage:
-            # print(f"Skipping gene_id: {train_feat['gene_id']}; start: {train_feat['start']}; end: {train_feat['end']} with <= {min_usage} usage!")
-            continue
 
         crop_feats.append(crop_feat)
 

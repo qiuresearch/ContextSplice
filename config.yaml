@@ -23,16 +23,15 @@ ensemble: # used for eval/test/predict only
 dataset:
   stage: ${stage}
   type: PangolinSolo  # PangolinSolo, Pangolin, GeneSites, GeneCrops
+  split_seed: 111
   train_path: null
   val_path: null
   test_path: null
   predict_path: null
-  split_seed: 111
   train_epoch_length: null
   val_epoch_length: null
   test_epoch_length: null
   predict_epoch_length: null
-  enable_cache: false
   debug: ${debug}
 model:
   type: null
@@ -70,7 +69,7 @@ litrun:
   trainer:
     overfit_batches: 0 # 0 means all batches used
     min_epochs: 3
-    max_epochs: 21
+    max_epochs: 111
     max_time: "7:00:00:00"  # D:HH:MM:SS
     strategy: auto
     precision: 32

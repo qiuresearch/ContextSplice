@@ -367,14 +367,16 @@ class GeneSitesDataset(Dataset):
     def __init__(
         self,
         genesites_df,
-        num_classes=2,
+        num_classes=2,  # Number of splice site class (2: N/Y, 3:N/Donor/Acceptor)
         epoch_length=None,
         tissue_types=None,
+        tissue_embedding_path=None,
         dataset_name=None,
-        pipe_genecrops=False, # whether to exhaust all gene crops before sampling the next gene
-        weighted_sampling='gene_span',
-        dynamic_weights=False,
-        min_quality=None,
+        queue_genecrops=True, # whether to queue all gene crops before sampling the next gene
+        weighted_sampling=None, # 'gene_span',
+        dynamic_weights=True,
+        min_cls_sites=2,
+        min_psi_usage=0.5,
         stratified_sampling=None,
         sampling_method=None,
         random_seed=42,
@@ -389,10 +391,11 @@ class GeneSitesDataset(Dataset):
             genesites_df (pd.DataFrame or str): Genesites DataFrame or path to CSV/pickle/parquet file.
             epoch_length (int, optional): Number of samples per epoch. Defaults to length of genesites_df.
             data_dir (str): Directory containing RNA structure files.
-            pipe_genecrops (bool): Whether to exhaust all gene crops before sampling the next gene.
+            queue_genecrops (bool): Whether to queue all gene crops before sampling the next gene.
             weighted_sampling (str): Sampling strategy ('gene_span' or 'uniform').
             dynamic_weights (bool): Update weights dynamically during training.
-            min_quality (float): Minimum quality threshold for samples.
+            min_cls_sites (int): Minimum number of splice sites for samples.
+            min_psi_usage (float): Minimum total usage (psi) for samples.
             stratified_sampling (str, optional): Column name for stratified sampling. If None, no stratification.
             sampling_method (str, optional): Sampling method ('random' or 'sequential'). Not implemented.
             dataset_name (str, optional): Name of the dataset.
@@ -404,6 +407,8 @@ class GeneSitesDataset(Dataset):
         super(GeneSitesDataset, self).__init__()
 
         self.is_child_process = utils.get_rank()  # utils.is_child_process()
+        self.random_seed = random_seed
+        self.iterations = 0
 
         if isinstance(genesites_df, str):
             if not os.path.exists(genesites_df):
@@ -420,66 +425,49 @@ class GeneSitesDataset(Dataset):
             raise ValueError("genesites_df must be a pandas DataFrame or file name.")
 
         self.genesites_df = genesites_df.reset_index(drop=True)
-        self.num_classes = num_classes
         self.epoch_length = len(genesites_df) if epoch_length is None else epoch_length
-        self.random_seed = random_seed
-        self.iterations = 0
 
-        self.genecrops_cache = [] if pipe_genecrops else None
+        self.num_classes = num_classes
         self.dataset_name = dataset_name
+
+        self.genecrops_queue = [] if queue_genecrops else None
 
         self.tissue_types = tissue_types
         if self.tissue_types is not None:
+            self.tissue_types = [t.lower() for t in self.tissue_types]
             self.tissue_cols = get_gtex_tissue_cols(self.tissue_types)
-            if len(self.tissue_cols) == 0:
-                ilogger.warning(f"tissue_types: {self.tissue_types} must contain at least one valid tissue type.")
-                self.tissue_cols = None
-            elif len(self.tissue_cols) > 1:
-                ilogger.warning(f"Multiple tissue types specified: {self.tissue_types}. Using the first tissue type for sampling.")
-                self.tissue_cols = self.tissue_cols[0]  # Use the first tissue column for sampling
-            else:
-                self.tissue_cols = self.tissue_cols[0]  # only one tissue type, use its column index
+            if len(self.tissue_cols) != len(self.tissue_types):
+                raise ValueError(f"Some tissue_types are not found: {self.tissue_types}.")
+        else:
+            self.tissue_cols = None
+
+        if tissue_embedding_path:
+            ilogger.info(f"Loading tissue embeddings from {tissue_embedding_path}...")
+            self.tissue_embeddings = pd.read_csv(tissue_embedding_path, index_col=0)
+            self.tissue_embeddings.columns = [str(col).lower() for col in self.tissue_embeddings.columns]
+
+            for t in self.tissue_types:
+                if t not in self.tissue_embeddings.columns:
+                    raise ValueError(f"Tissue type {t} not found in tissue embeddings columns.")
+        else:
+            self.tissue_embeddings = None
 
         self.training = training
-        self.min_quality = min_quality
+        self.min_cls_sites = min_cls_sites
+        self.min_psi_usage = min_psi_usage
+        self.dynamic_weights = dynamic_weights
 
-        # Set up customized sampling options
-        if stratified_sampling:
-            ilogger.info(
-                f"Setup stratified sampling based on column: {stratified_sampling}"
-            )
-            meta_groups = self.genesites_df.groupby(stratified_sampling)
-            if meta_groups.ngroups <= 1:
-                raise ValueError(
-                    f"Only one group found for stratified_sampling: {stratified_sampling}. Check your meta_df."
-                )
-
-            self.stratified_sampling = True
-            group_indices = meta_groups.indices
-            self.stratified_ngroups = len(group_indices)
-            self.stratified_names = list(group_indices.keys())
-            self.stratified_ilocs = list(group_indices.values())
-            ilogger.info(
-                f"Found {self.stratified_ngroups} groups for stratified sampling, e.g., {self.stratified_names[:5]}..."
-            )
-        else:
-            self.stratified_sampling = False
-            self.all_ilocs = np.arange(len(genesites_df))
+        self.stratified_sampling = stratified_sampling
+        self.setup_stratified_sampling()  # Initialize stratified sampling if specified
 
         self.weighted_sampling = weighted_sampling
         if self.weighted_sampling:
-            if self.weighted_sampling not in genesites_df.columns:
-                raise ValueError(
-                    "weighted_sampling is True but column <{}> is missing in meta_df.".format(
-                        self.weighted_sampling
-                    )
-                )
-            self.iweight = self.genesites_df.columns.get_loc(self.weighted_sampling)
-            self.get_normalized_sampling_weights()
+            if self.weighted_sampling not in self.genesites_df.columns:
+                raise ValueError(f"weighted_sampling column <{self.weighted_sampling}> is missing.")
+            self.sampling_weights = self.genesites_df[self.weighted_sampling].values
+            self.normalize_sampling_weights()
         else:
-            self.iweight = None  # Default to None if not present
-
-        self.dynamic_weights = dynamic_weights
+            self.sampling_weights = None  # Default to None if not present
 
         self.sampling_method = sampling_method  # not yet implemented
         if sampling_method:
@@ -490,18 +478,21 @@ class GeneSitesDataset(Dataset):
             self.stratified_sampling or self.sampling_method or self.weighted_sampling
         )
 
-        if not self.customized_sampling and self.epoch_length > len(genesites_df):
+        if not self.customized_sampling and self.epoch_length > len(self.genesites_df):
             ilogger.warning(
-                f"epoch_size {self.epoch_length} is greater than sample_size {len(genesites_df)}, adjusting epoch_size."
+                f"epoch_size {self.epoch_length} is greater than sample_size {len(self.genesites_df)}, adjusting epoch_size."
             )
-            self.epoch_length = len(genesites_df)
+            self.epoch_length = len(self.genesites_df)
 
         if summarize and not self.is_child_process:
             print(f"SpliceDataset summary:")
             print(f"               training: {self.training}")
             print(f"           len(meta_df): {len(self.genesites_df)}")
+            print(f"           tissue_types: {self.tissue_types}")
+            print(f"            tissue_cols: {self.tissue_cols}")
+            print(f"      tissue_embeddings: {self.tissue_embeddings.shape if self.tissue_embeddings is not None else None}")
             print(f"             epoch_size: {self.epoch_length}")
-            print(f"            min_quality: {self.min_quality}")
+            print(f"            min_quality: {self.min_cls_sites}")
             print(f"    customized_sampling: {self.customized_sampling}")
             print(f"    stratified_sampling: {self.stratified_sampling}")
             if self.stratified_sampling:
@@ -523,21 +514,45 @@ class GeneSitesDataset(Dataset):
         sample_feat = None
         while sample_feat is None:
             sample_feat = self.omni_sampler(idx)
+            idx = np.random.randint(0, self.epoch_length)
 
         return sample_feat
 
-    def get_normalized_sampling_weights(self):
+    def setup_stratified_sampling(self):
+        if self.stratified_sampling:
+            ilogger.info(f"Setup stratified sampling on column: {self.stratified_sampling}")
+            meta_groups = self.genesites_df.groupby(self.stratified_sampling)
+            if meta_groups.ngroups <= 1:
+                raise ValueError(
+                    f"Only one group found for stratified_sampling: {self.stratified_sampling}. Check your meta_df."
+                )
+
+            self.stratified_sampling = True
+            group_indices = meta_groups.indices
+            self.stratified_ngroups = len(group_indices)
+            self.stratified_names = list(group_indices.keys())
+            self.stratified_ilocs = list(group_indices.values())
+            ilogger.info(
+                f"Found {self.stratified_ngroups} groups for stratified sampling, e.g., {self.stratified_names[:5]}..."
+            )
+        else:
+            self.all_ilocs = np.arange(len(self.genesites_df))
+
+    def normalize_sampling_weights(self):
         """Get normalized sampling weights for stratified or all indices
 
         Yields:
             self.stratified_sampling_weights: list of np.arrays for each stratified group
             self.sampling_weights: np.array for all indices
         """
-
+        if self.sampling_weights is None:
+            ilogger.warning("Sampling weights are None, skipping normalization.")
+            return
+        
         if self.stratified_sampling:
             self.stratified_sampling_weights = []
             for i, ilocs in enumerate(self.stratified_ilocs):
-                weights = self.genesites_df.iloc[ilocs, self.iweight].values
+                weights = self.sampling_weights[ilocs]
                 total_weight = weights.sum()
                 if total_weight == 0:
                     ilogger.warning(
@@ -547,22 +562,19 @@ class GeneSitesDataset(Dataset):
                 else:
                     self.stratified_sampling_weights.append(weights / total_weight)
         else:
-            weights = self.genesites_df.iloc[self.all_ilocs, self.iweight].values
-            total_weight = weights.sum()
+            total_weight = self.sampling_weights.sum()
             if total_weight == 0:
-                ilogger.warning(
-                    f"Total sampling weight is zero for the entire dataset."
-                )
+                ilogger.warning(f"Total sampling weight is zero for the entire dataset.")
                 self.sampling_weights = None
             else:
-                self.sampling_weights = weights / total_weight
+                self.sampling_weights = self.sampling_weights / total_weight
 
     def omni_sampler(self, idx):
         """Customized sampling logic based on the configuration"""
         self.iterations += 1
 
-        if self.genecrops_cache is not None and len(self.genecrops_cache):
-            sample_feat = self.genecrops_cache.pop(0)
+        if self.genecrops_queue:
+            sample_feat = self.genecrops_queue.pop(0)
         else:
             if self.customized_sampling:
                 if self.stratified_sampling:  # randomly sample from stratified groups
@@ -579,37 +591,43 @@ class GeneSitesDataset(Dataset):
                     idx = np.random.choice(ilocs, p=weights)
                 else:
                     idx = np.random.choice(ilocs)
-
             gene_ds = self.genesites_df.iloc[idx]
+
+            idx_tissue = np.random.randint(len(self.tissue_cols)) if self.tissue_cols else 0
             gene_feat = splice_feats.sprinkle_sites_on_sequence(
                 gene_ds,
                 n_classes=self.num_classes,
-                icol=self.tissue_cols,
+                icol=self.tissue_cols[idx_tissue] if self.tissue_cols else 0,
                 # training=self.training,
             )
             crop_feats = splice_feats.get_crop_feats_from_single_seq(
                 gene_feat,
-                num_crops=11 if self.genecrops_cache is not None else 1,
+                stochastic_crops=True,
                 crop_size=5000,
                 flank_size=5000,
-                min_sites=0,
-                min_usage=0,
+                min_cls_sites=self.min_cls_sites,
+                min_psi_usage=self.min_psi_usage,
             )
-            sample_feat = crop_feats[0]
-            if self.genecrops_cache is not None:
-                self.genecrops_cache.extend(crop_feats[1:])
+            if self.sampling_weights is not None and self.dynamic_weights:
+                self.sampling_weights[idx] = len(crop_feats)  # update sampling weight based on number of crops
 
-        if sample_feat is None:
-            if self.weighted_sampling and self.dynamic_weights:
-                self.genesites_df.iloc[idx, self.iweight] = 0.0
-            ilogger.warning(f"Warning: Sample features for index {idx} are None, skipping.")
-            return None
+            if len(crop_feats) > 0:
+                if self.tissue_embeddings is not None and self.tissue_types is not None:
+                    tissue_type = self.tissue_types[idx_tissue]
+                    tissue_embedding = self.tissue_embeddings[tissue_type].values.astype(np.float32)
+                    for crop_feat in crop_feats:
+                        crop_feat["reg_context"] = tissue_embedding
+
+                sample_feat = crop_feats[0]
+                if self.genecrops_queue is not None:
+                    self.genecrops_queue.extend(crop_feats[1:])
+            else:
+                sample_feat = None
 
         if self.training:
-            if self.dynamic_weights:
-                # Todo: update sampling weights based on sample quality
-                if self.weighted_sampling and self.iterations % self.epoch_length == 0:
-                    # self.get_normalized_sampling_weights()
+            if self.dynamic_weights and self.weighted_sampling:
+                if self.iterations % self.epoch_length == 0:
                     pass
+                    # self.normalize_sampling_weights()
 
         return sample_feat
