@@ -72,14 +72,39 @@ install: ## Install python dependencies under conda environment
 	conda install -c conda-forge pandas psutil numpy hydra-core omegaconf wandb gputil matplotlib beartype h5py pytables pyarrow -y
 	conda install mappy -c bioconda -y
 
+
+test_contextsplice_gtex11_genesite: ## Evaluate ContextSplice model trained on GTEx v11 GeneSite dataset
+	ckpt_dir=checkpoints/contextsplice.gtex11.multi_2026-10-25_12-26-12_ig7wdjsk
+	ckpt_files=($$(ls $${ckpt_dir}/valoss*.ckpt))
+	ckpt_path=$${ckpt_files[0]}
+	tissues=(heart liver brain testis)
+	for ((i=0; i<$${#tissues[@]}; i++)) ; do
+		conda run --no-capture-output --name $(CONDA_ENV_NAME) \
+		python -u run.py stage=eval \
+			infer.save_prefix=$${ckpt_dir}/contextsplice_test_$${tissues[i]//,/-} \
+			infer.save_level=2 infer.eval_dim=null \
+			model.type=contextsplicefilm \
+			model.state_dict_path=null \
+			litrun.resume_from_ckpt=$${ckpt_path} \
+			dataset.type=genesites \
+			dataset.train_path=data/gtex_v11/genesite_cls_psi_monologs.parquet \
+			+dataset.tissue_embedding_path="data/gtex_v11/gene_logcpm_batcorrected_top128.csv" \
+			+dataset.tissue_types=[$${tissues[i]}] \
+			dataset.predict_epoch_length=$(predict_epoch_len) \
+			dataset.predict_path=null \
+			debug=$(debug)
+		wait
+	done
+
+
 train_contextsplice_gtex11_genesite: ## Train ContextSplice model on GTEx v11 GeneSite dataset
 	conda run --no-capture-output --name $(CONDA_ENV_NAME) \
 	python -u run.py stage=train gpus=[$(gpus)] \
-		run_name=contextsplice.gtex11.multi \
+		run_name=contextsplice.gtex11.monologs \
 		model.type=contextsplicefilm \
 		model.state_dict_path=null \
 		dataset.type=genesites \
-		dataset.train_path=data/gtex_v11/genesite_cls_psi.parquet \
+		dataset.train_path=data/gtex_v11/genesite_cls_psi_monologs.parquet \
 		+dataset.tissue_embedding_path="data/gtex_v11/gene_logcpm_batcorrected_top128.csv" \
 		+dataset.tissue_types=[Blood,Brain,Heart,Liver,Testis] \
 		datamodule.train_batch_size=$(train_batch_size) \

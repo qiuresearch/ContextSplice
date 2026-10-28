@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 import os
 import datetime
+from beartype import typing
 import numpy as np
+import omegaconf
 import pandas as pd
 import hydra
 import GPUtil
 from omegaconf import DictConfig, OmegaConf, ListConfig
-
+import omegaconf
 import torch
 import torch.nn as nn
 
@@ -138,8 +140,15 @@ def get_datasets(dataset_cfg: DictConfig):
 
         train_set = datasets.GeneSitesDataset(train_df, epoch_length=dataset_cfg.train_epoch_length, summarize=True, **dataset_cfg)
         val_set = datasets.GeneSitesDataset(val_df, epoch_length=dataset_cfg.val_epoch_length, summarize=False, **dataset_cfg)
-        # test_set = datasets.GeneSitesDataset(test_df, epoch_length=dataset_cfg.test_epoch_length, summarize=False, **dataset_cfg)
-        predict_set = datasets.GeneSitesDataset(test_df, epoch_length=dataset_cfg.predict_epoch_length, summarize=False, **dataset_cfg)
+        if training and dataset_cfg.test_path:
+            predict_set = datasets.GeneSitesDataset(dataset_cfg.test_path, epoch_length=dataset_cfg.test_epoch_length, summarize=False, **dataset_cfg)
+        elif training and len(test_df) > 0:
+            predict_set = datasets.GeneSitesDataset(test_df, epoch_length=dataset_cfg.test_epoch_length, summarize=False, **dataset_cfg)
+        elif (testing or predicting) and dataset_cfg.predict_path:
+            predict_set = datasets.GeneSitesDataset(dataset_cfg.predict_path, epoch_length=dataset_cfg.predict_epoch_length, summarize=False, **dataset_cfg)
+        elif (testing or predicting) and len(test_df) > 0:
+            predict_set = datasets.GeneSitesDataset(test_df, epoch_length=dataset_cfg.predict_epoch_length, summarize=False, **dataset_cfg)
+
     elif dataset_cfg.type.upper() == 'GeneCrops'.upper():
         train_indices, val_indices = None, None
 
@@ -311,6 +320,13 @@ def main(main_cfg: DictConfig):
         # ilogger.info(f"Training model with config:\n{omegaconf.OmegaConf.to_yaml(main_cfg)}")
         trainer = litrun.fit(litdata, save_cfg=main_cfg, accelerator=accelerator, devices=devices, debug=main_cfg.debug)
         ilogger.info("Training completed.")
+
+        if litdata.predict_dataloader() is not None:
+            eval_outputs = litrun.evaluate(datamodule=litdata, accelerator=accelerator, devices=devices, debug=main_cfg.debug,
+                                           save_prefix=main_cfg.infer.save_prefix, save_level=main_cfg.infer.save_level,
+                                           eval_dim=main_cfg.infer.eval_dim,
+                                           )            
+            ilogger.info("Evaluation completed.")
         
         return trainer
     elif main_cfg.stage in ('test', 'testing', 'eval', 'evaluate'):

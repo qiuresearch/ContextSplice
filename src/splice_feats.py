@@ -94,7 +94,7 @@ def sprinkle_sites_on_sequence(gene_sites, n_classes=4, icol=None, debug=False):
 
 def get_crop_feats_from_single_seq(seq_feat, stochastic_crops=True,
                                    crop_size=5000, flank_size=5000,
-                                   min_cls_sites=0, min_psi_usage=0,
+                                   min_cls_sites=0, min_psi_usage=0.0,
                                    debug=False):
     """ Generate crop features for a single RNA transcript by croping the sequence
     Args:

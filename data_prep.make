@@ -112,6 +112,11 @@ download_ensembl_references: ## Download ensembl reference genome and transcript
 	wget -c --no-proxy -L ftp://ftp.ensembl.org/pub/release-$${latest_release}/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna_sm.primary_assembly.fa.gz
 	wget -c --no-proxy -L ftp://ftp.ensembl.org/pub/release-$${latest_release}/gtf/homo_sapiens/Homo_sapiens.GRCh38.$${latest_release}.gtf.gz
 
+download_homology_refdata: ## Download paralogs and orthologs reference data
+	@echo "Downloading paralogs and orthologs reference data..."
+	wget -c https://ftp.ensembl.org/pub/release-113/tsv/ensembl-compara/homologies/Compara.113.protein_default.homologies.tsv.gz
+	wget -c https://ftp.ensembl.org/pub/release-113/tsv/ensembl-compara/homologies/Compara.113.ncrna_default.homologies.tsv.gz
+
 nextflow_rnaseq_test: nextflow_check ## run nextflow test on rnaseq data
 	nextflow run nf-core/rnaseq -r 3.23.0 -profile test_full,$(profile) --outdir test --max_cpus 6
 

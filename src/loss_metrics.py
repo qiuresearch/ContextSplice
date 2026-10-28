@@ -104,8 +104,8 @@ def calc_topk_roc_prc_curves(y_pred, y_true, ks=(0.5, 1, 2, 4), multiples_of_tru
 
     sorted_indices = np.arange(len(recalls)) # [np.argsort(recalls)]
     # compute AUC using the trapezoidal rule with numpy
-    roc_auc = -np.trapz(tprs[sorted_indices], fprs[sorted_indices])
-    prc_auc = -np.trapz(precisions[sorted_indices], recalls[sorted_indices])
+    roc_auc = -np.trapezoid(tprs[sorted_indices], fprs[sorted_indices])
+    prc_auc = -np.trapezoid(precisions[sorted_indices], recalls[sorted_indices])
     # alternatively, we can also use scipy.integrate to compute AUC
     # roc_auc = integrate.trapz(tprs[sorted_indices], fprs[sorted_indices])
     # prc_auc = integrate.trapz(precisions[sorted_indices], recalls[sorted_indices])

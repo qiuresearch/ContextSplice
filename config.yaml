@@ -57,7 +57,7 @@ datamodule: # Datamodule + Dataloader + Sampler configs
 litrun:
   seed: 1234
   resume_from_ckpt: null
-  resume_model_weights_only: true
+  resume_model_weights_only: false
   optimizer:
     learning_rate: 0.0007
     eps: 1e-8

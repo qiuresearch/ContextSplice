@@ -2,8 +2,10 @@ import os
 import time
 import copy
 import datetime
-from beartype.typing import Any, Dict, Optional
-from omegaconf import DictConfig, OmegaConf
+from beartype import typing
+from matplotlib import typing
+import omegaconf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 from tqdm import tqdm
 import wandb
 
@@ -20,6 +22,12 @@ from . import loss_metrics
 
 ilogger = utils.get_pylogger(__name__)
 
+# Allowlist OmegaConf classes for PyTorch 2.6+ checkpoint loading
+torch.serialization.add_safe_globals([
+    DictConfig,
+    ListConfig,
+    omegaconf.base.ContainerMetadata,
+    typing.Any])
 
 def peekaboo_epoch_metrics(epoch_metrics, prefix='', logger=None, logger_prefix='val/epoch_'):
     """ Display averaged batch metrics (a list of dicts) as a table. """
@@ -224,13 +232,14 @@ class OmniRunModule(LightningModule):
 
     def resume_from_ckpt(self, ckpt_path=None):
         """ not yet used """
+        ilogger.info(f"Resuming from checkpoint: {ckpt_path}")
         cfg = self.cfg
         if cfg.resume_from_ckpt and not cfg.resume_model_weights_only: # actual parameter loading is done by the trainer
             if(os.path.isdir(cfg.resume_from_ckpt)):
                 pass
                 # last_global_step = get_global_step_from_zero_checkpoint(cfg.resume_from_ckpt)
             else:
-                sd = torch.load(cfg.resume_from_ckpt, map_location=torch.device("cpu"))
+                sd = torch.load(cfg.resume_from_ckpt, map_location=torch.device("cpu"), weights_only=False)
                 last_global_step = int(sd['global_step'])
             self.resume_last_lr_step(last_global_step)
             ilogger.info(f"Successfully loaded last lr step: {self.last_lr_step}")
@@ -241,7 +250,7 @@ class OmniRunModule(LightningModule):
                 # sd = get_fp32_state_dict_from_zero_checkpoint(cfg.resume_from_ckpt)
             else:
                 ilogger.info("Loading model weights only...")
-                sd = torch.load(cfg.resume_from_ckpt, map_location=torch.device("cpu"))
+                sd = torch.load(cfg.resume_from_ckpt, map_location=torch.device("cpu"), weights_only=False)
 
             if 'state_dict' in sd:
                 sd = {k[len("net."):]:v for k,v in sd['state_dict'].items() if k.startswith("net.")}
@@ -640,6 +649,7 @@ class OmniRunModule(LightningModule):
             model=self,
             datamodule=datamodule,
             ckpt_path=cfg.get('resume_from_ckpt', None),
+            weights_only=cfg.get('resume_model_weights_only', False)
         )
 
         return trainer
@@ -666,6 +676,7 @@ class OmniRunModule(LightningModule):
             self,
             datamodule=datamodule,
             ckpt_path=self.cfg.get('resume_from_ckpt', None),
+            weights_only=self.cfg.get('resume_model_weights_only', False),
         )
 
         if save_level >= 1 and save_prefix and not self.is_child_process and self.predict_epoch_metrics:
@@ -703,6 +714,7 @@ class OmniRunModule(LightningModule):
             self,
             datamodule=datamodule,
             ckpt_path=self.cfg.get('resume_from_ckpt', None),
+            weights_only=self.cfg.get('resume_model_weights_only', False)
         )
 
         # concat all batches to two dicts of tensors (batch_feats, preds)
