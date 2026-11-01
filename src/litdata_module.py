@@ -88,6 +88,9 @@ class OmniDataModule(LightningDataModule):
                           pin_memory=self.cfg.get('test_pin_memory', False),
                           persistent_workers=self.cfg.get('test_persistent_workers', True),
                           )
+    def set_predict_dataset(self, predict_dataset):
+        self.predict_dataset = predict_dataset
+        
     def predict_dataloader(self):
         if self.predict_dataset is None:
             return None

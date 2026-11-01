@@ -72,9 +72,9 @@ install: ## Install python dependencies under conda environment
 	conda install -c conda-forge pandas psutil numpy hydra-core omegaconf wandb gputil matplotlib beartype h5py pytables pyarrow -y
 	conda install mappy -c bioconda -y
 
-
-test_contextsplice_gtex11_genesite: ## Evaluate ContextSplice model trained on GTEx v11 GeneSite dataset
+test_contextsplice_gtex11_monologs: ## Evaluate ContextSplice model trained on GTEx v11 GeneSite dataset
 	ckpt_dir=checkpoints/contextsplice.gtex11.multi_2026-10-25_12-26-12_ig7wdjsk
+	ckpt_dir=checkpoints/contextsplice.gtex11.monologs_2026-10-28_16-07-05_92rs5jgh
 	ckpt_files=($$(ls $${ckpt_dir}/valoss*.ckpt))
 	ckpt_path=$${ckpt_files[0]}
 	tissues=(heart liver brain testis)
@@ -96,8 +96,7 @@ test_contextsplice_gtex11_genesite: ## Evaluate ContextSplice model trained on G
 		wait
 	done
 
-
-train_contextsplice_gtex11_genesite: ## Train ContextSplice model on GTEx v11 GeneSite dataset
+train_contextsplice_gtex11_monologs: ## Train ContextSplice model on GTEx v11 GeneSite dataset
 	conda run --no-capture-output --name $(CONDA_ENV_NAME) \
 	python -u run.py stage=train gpus=[$(gpus)] \
 		run_name=contextsplice.gtex11.monologs \
@@ -112,19 +111,71 @@ train_contextsplice_gtex11_genesite: ## Train ContextSplice model on GTEx v11 Ge
 		litrun.resume_from_ckpt=null \
 		debug=$(debug)
 
-train_pangolinsolo_gtex11_genesite: ## Train PangolinSolo model on GTEx v11 GeneSite dataset
+test_contextsplice_gtex11_all: ## Evaluate ContextSplice model trained on GTEx v11 GeneSite dataset
+	ckpt_dir=checkpoints/contextsplice.gtex11.multi_2026-10-25_12-26-12_ig7wdjsk
+	ckpt_files=($$(ls $${ckpt_dir}/valoss*.ckpt))
+	ckpt_path=$${ckpt_files[0]}
+	tissues=(heart liver brain testis)
+	for ((i=0; i<$${#tissues[@]}; i++)) ; do
+		conda run --no-capture-output --name $(CONDA_ENV_NAME) \
+		python -u run.py stage=eval \
+			infer.save_prefix=$${ckpt_dir}/contextsplice_test_$${tissues[i]//,/-} \
+			infer.save_level=1 infer.eval_dim=null \
+			model.type=contextsplicefilm \
+			model.state_dict_path=null \
+			litrun.resume_from_ckpt=$${ckpt_path} \
+			dataset.type=genesites \
+			dataset.train_path=data/gtex_v11/genesite_cls_psi.parquet \
+			+dataset.tissue_embedding_path="data/gtex_v11/gene_logcpm_batcorrected_top128.csv" \
+			+dataset.tissue_types=[$${tissues[i]}] \
+			dataset.predict_epoch_length=$(predict_epoch_len) \
+			dataset.predict_path=null \
+			debug=$(debug)
+		wait
+	done
+
+
+train_contextsplice_gtex11_all: ## Train ContextSplice model on GTEx v11 GeneSite dataset
 	conda run --no-capture-output --name $(CONDA_ENV_NAME) \
 	python -u run.py stage=train gpus=[$(gpus)] \
-		run_name=pangolinsolo.gtex11.$(tissue) \
-		model.type=pangolinsolo \
+		run_name=contextsplice.gtex11.monologs \
+		model.type=contextsplicefilm \
 		model.state_dict_path=null \
 		dataset.type=genesites \
-		+dataset.tissue_types=[$(tissue)] \
 		dataset.train_path=data/gtex_v11/genesite_cls_psi.parquet \
+		+dataset.tissue_embedding_path="data/gtex_v11/gene_logcpm_batcorrected_top128.csv" \
+		+dataset.tissue_types=[Blood,Brain,Heart,Liver,Testis] \
 		datamodule.train_batch_size=$(train_batch_size) \
 		datamodule.val_batch_size=$(val_batch_size) \
 		litrun.resume_from_ckpt=null \
 		debug=$(debug)
+
+
+train_pangolinsolo_gtex11: ## Train PangolinSolo model on GTEx v11 GeneSite dataset
+	tissues=("Kidney" "Liver" "Lung" "Muscle" "Nerve" "Ovary" "Pancreas" "Pituitary" "Prostate")
+	tissues=("Salivary Gland" "Skin" "Small Intestine" "Spleen" "Stomach" "Testis" "Thyroid" "Uterus" "Vagina")
+	tissues=("Adipose Tissue" "Adrenal Gland" "Bladder" "Blood" "Blood Vessel" "Bone Marrow")
+	tissues=("Brain" "Breast" "Cervix Uteri" "Colon" "Esophagus" "Fallopian Tube" "Heart")
+	for ((i=0; i<$${#tissues[@]}; i++)) ; do
+		tissue=$${tissues[i],,}
+		tissue=$${tissue// /}
+		tissue=$${tissue//,/}
+
+		conda run --no-capture-output --name $(CONDA_ENV_NAME) \
+		python -u run.py stage=train gpus=[$(gpus)] \
+			run_name=pangolinsolo.gtex11.$${tissue} \
+			infer.save_level=1 infer.eval_dim=null \
+			model.type=pangolinsolo \
+			model.state_dict_path=null \
+			dataset.type=genesites \
+			+dataset.tissue_types=[$${tissue}] \
+			dataset.train_path=data/gtex_v11/genesite_cls_psi_monologs.parquet \
+			datamodule.train_batch_size=$(train_batch_size) \
+			datamodule.val_batch_size=$(val_batch_size) \
+			litrun.resume_from_ckpt=null \
+			debug=$(debug)
+		wait
+	done
 
 
 test_pangolinomni3_pangolinsolo123: ## Evaluate PangolinOmni3 model trained on PangolinSolo123 dataset

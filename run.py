@@ -317,17 +317,39 @@ def main(main_cfg: DictConfig):
     litdata = get_litdata(torch_datasets, main_cfg.datamodule)
 
     if main_cfg.stage in ('train', 'training', 'fit'):
-        # ilogger.info(f"Training model with config:\n{omegaconf.OmegaConf.to_yaml(main_cfg)}")
+        ilogger.info(f"Training model with config: {get_config_preview(main_cfg.litrun.trainer)}")
         trainer = litrun.fit(litdata, save_cfg=main_cfg, accelerator=accelerator, devices=devices, debug=main_cfg.debug)
         ilogger.info("Training completed.")
 
-        if litdata.predict_dataloader() is not None:
+        # Update the litrun configuration to resume from the best checkpoint after training.
+        litrun.cfg.resume_from_ckpt = trainer.checkpoint_callback.best_model_path
+        litrun.cfg.resume_model_weights_only = False
+
+        if litdata.predict_dataset is not None:
             eval_outputs = litrun.evaluate(datamodule=litdata, accelerator=accelerator, devices=devices, debug=main_cfg.debug,
-                                           save_prefix=main_cfg.infer.save_prefix, save_level=main_cfg.infer.save_level,
+                                           save_prefix=f'{litrun.cfg.save_dir}/test',
+                                           save_level=main_cfg.infer.save_level,
                                            eval_dim=main_cfg.infer.eval_dim,
                                            )            
-            ilogger.info("Evaluation completed.")
-        
+            ilogger.info("Eval of predict dataset completed.")
+
+        if litdata.val_dataset is not None:
+            litdata.set_predict_dataset(litdata.val_dataset)
+            eval_outputs = litrun.evaluate(datamodule=litdata, accelerator=accelerator, devices=devices, debug=main_cfg.debug,
+                                           save_prefix=f'{litrun.cfg.save_dir}/val',
+                                           save_level=main_cfg.infer.save_level,
+                                           eval_dim=main_cfg.infer.eval_dim,
+                                           )            
+            ilogger.info("Eval of val. dataset completed.")
+
+        litdata.set_predict_dataset(litdata.train_dataset)
+        eval_outputs = litrun.evaluate(datamodule=litdata, accelerator=accelerator, devices=devices, debug=main_cfg.debug,
+                                       save_prefix=f'{litrun.cfg.save_dir}/train',
+                                       save_level=main_cfg.infer.save_level,
+                                       eval_dim=main_cfg.infer.eval_dim,
+                                       )
+        ilogger.info("Eval of train dataset completed.")
+
         return trainer
     elif main_cfg.stage in ('test', 'testing', 'eval', 'evaluate'):
 

@@ -7,8 +7,8 @@ accelerator: gpu
 run_name: ${model.type}_${dataset.type}
 project: GWSplice
 infer: # used for eval/test/predict only
-  save_prefix: dummy
-  save_level: 2 # 0: nothing, 1: summary metrics, 2: model outputs, 3: calc and save individual sample metrics
+  save_prefix: outputs/infer_${run_name}
+  save_level: 1 # 0: nothing, 1: summary metrics, 2: model outputs, 3: calc and save individual sample metrics
   eval_dim: null # null or a single dim for evaluating each slice along this dim
 ensemble: # used for eval/test/predict only
   enable: false
@@ -67,12 +67,12 @@ litrun:
     lr_T_mult: 2
     last_lr_step: -1
   trainer:
-    overfit_batches: 0 # 0 means all batches used
-    min_epochs: 3
-    max_epochs: 111
     max_time: "7:00:00:00"  # D:HH:MM:SS
-    strategy: auto
     precision: 32
+    max_epochs: 111
+    min_epochs: 3
+    overfit_batches: 0 # 0 means all batches used
+    strategy: auto
     deterministic: false
     log_every_n_steps: 1
     num_sanity_val_steps: 0
@@ -87,7 +87,7 @@ litrun:
   early_stopping:
     monitor: val_loss
     mode: min
-    patience: 11
+    patience: 7
     strict: true
     verbose: true
   lr_monitor:

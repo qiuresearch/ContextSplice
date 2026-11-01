@@ -69,8 +69,9 @@ def save_epoch_metrics(epoch_metrics, save_path):
         print("No epoch metrics to save.")
         return
 
-    if not os.path.exists(os.path.dirname(save_path)) and not os.path.isdir(os.path.dirname(save_path)):
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    save_dir = os.path.dirname(save_path)
+    if save_dir and not os.path.exists(save_dir) and not os.path.isdir(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
         
     with open(save_path, 'w') as f:
         keys = list(epoch_metrics[0].keys())
@@ -81,8 +82,9 @@ def save_epoch_metrics(epoch_metrics, save_path):
 
 def save_model_outputs(feats, preds, save_path, pruning=True):
     """ Save model outputs (features and predictions) to a file. """
-    if not os.path.exists(os.path.dirname(save_path)) and not os.path.isdir(os.path.dirname(save_path)):
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    save_dir = os.path.dirname(save_path)
+    if save_dir and not os.path.exists(save_dir) and not os.path.isdir(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
 
     if pruning:
         feats = feats.copy()
@@ -175,12 +177,15 @@ class NanGradientCallback(Callback):
     
 
 class OmniRunModule(LightningModule):
+    """ A PyTorch Lightning module that wraps a model and provides training, validation, testing, and prediction steps.
+    It also handles logging, checkpointing, and evaluation."""
     def __init__(self, model, cfg=None, **kwargs):
         super().__init__()
 
         self.is_child_process = utils.get_rank() # utils.is_child_process()
 
         self.model = model
+        self.trainer = None
         self.cfg = {} if cfg is None else cfg
         self.extra_cfg = kwargs
 
@@ -603,6 +608,7 @@ class OmniRunModule(LightningModule):
             # ilogger.warning("Anomaly detection is enabled. Training will be slow!")
             #
 
+        cfg.save_dir = save_dir
         # save_conf is solely for saving purposes
         if save_cfg is not None:
             save_cfg = OmegaConf.merge(save_cfg, OmegaConf.create({'litrun': cfg}))

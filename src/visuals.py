@@ -167,7 +167,7 @@ def plot_agg_metrics(agg_metrics, save_prefix=None, display=True):
     # display all scalar number metrics in sum_metrics as a table
     plt.subplot(2, 2, 1)
     scalar_metrics = {k: v for k, v in agg_metrics.items() if utils.is_scalar(v)}
-    table_data = [[k, f"{int(v):,}" if int(v) == v else f"{v:.4f}"] for k, v in scalar_metrics.items()]
+    table_data = [[k, f"{int(v):,}" if int(v) == v else f"{v:.6f}"] for k, v in scalar_metrics.items()]
     table = plt.table(cellText=table_data, colLabels=['Metric', 'Value'], loc='center')
     table.auto_set_font_size(False)
     table.set_fontsize(12)
@@ -245,6 +245,7 @@ def plot_one_hot(array, title="One-Hot Encoded Sequence"):
     plt.tight_layout()
     plt.show()
 
+
 def Plot_2D_Array(array):
     ## 2D torch tensor, shape =  torch.Size([3, 15000])
     # Plot
@@ -265,6 +266,7 @@ def Plot_2D_Array(array):
     plt.tight_layout()
     plt.show()
     return None
+
 
 def plot_one_hot_and_labels_zoom(one_hot_array, label_array, zoom_start=0, zoom_end=None, title="Zoomed Sequence and Labels"):
     """
@@ -363,6 +365,7 @@ def plot_one_hot_and_labels_zoom(one_hot_array, label_array, zoom_start=0, zoom_
     plt.suptitle(title, y=1.02)
     plt.show()
     return None
+
 
 def plot_one_hot_and_predictions_zoom(one_hot_array, prediction_array, zoom_start=8600, zoom_end=9001, title="Zoomed Prediction View"):
     """
